@@ -26,7 +26,7 @@ namespace AstroVoxel.Bootstrap
         [Header("Joueur")]
         [SerializeField] private float playerHeight  = 1.8f;
         [SerializeField] private float playerRadius  = 0.4f;
-        [SerializeField] private float spawnAltitude = 5f;   // blocs au-dessus de la surface
+        [SerializeField] private float spawnAltitude = 10f;   // blocs au-dessus de la surface
 
         [Header("Matériau des chunks (optionnel)")]
         [SerializeField] private Material chunkMaterial;
@@ -95,10 +95,9 @@ namespace AstroVoxel.Bootstrap
             playerGO.layer = LayerMask.NameToLayer("Player") >= 0
                 ? LayerMask.NameToLayer("Player") : 0;
 
-            // Position de spawn : juste au-dessus de la surface planétaire.
-            // La surface est à PlanetCoreRadius + SurfaceAmplitude/2 du centre.
-            float surfaceApprox = PlanetChunkGenerator.PlanetCoreRadius
-                                + PlanetChunkGenerator.SurfaceAmplitude * 0.5f + 3f;
+            // Position de spawn : au-dessus du pôle nord de la planète.
+            // La surface est à PlanetCoreRadius ± SurfaceAmplitude/2 du centre.
+            float surfaceApprox = PlanetChunkGenerator.PlanetCoreRadius + 2f;
             float spawnDist = surfaceApprox + spawnAltitude;
             playerGO.transform.position = Vector3.up * spawnDist;
             playerGO.transform.up       = Vector3.up;

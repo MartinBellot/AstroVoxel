@@ -141,53 +141,59 @@ namespace AstroVoxel.VoxelEngine
 
         private void LoadChunksAroundViewer(Vector3 viewerLocal, Vector3 faceNormal)
         {
-            // Axes tangentiels à la face
-            Vector3 up      = faceNormal;
-            Vector3 right   = Vector3.Cross(up, (Mathf.Abs(up.y) < 0.9f ? Vector3.up : Vector3.forward)).normalized;
-            Vector3 forward = Vector3.Cross(right, up).normalized;
+            // Axes tangentiels de référence pour la face courante (repère plat)
+            Vector3 faceRight   = Vector3.Cross(faceNormal, Mathf.Abs(faceNormal.y) < 0.9f ? Vector3.up : Vector3.forward).normalized;
+            Vector3 faceForward = Vector3.Cross(faceRight, faceNormal).normalized;
 
-            int cw = VoxelData.ChunkWidth;
+            int   cw      = VoxelData.ChunkWidth;
+            float coreR   = PlanetChunkGenerator.PlanetCoreRadius;
+            float depth   = PlanetChunkGenerator.ChunkDepthBelowSurface;
 
-            // Coordonnées du viewer en blocs sur la face
-            float vr = Vector3.Dot(viewerLocal, right);
-            float vf = Vector3.Dot(viewerLocal, forward);
-
+            // Coordonnées de chunk du viewer sur le plan de la face
+            float vr = Vector3.Dot(viewerLocal, faceRight);
+            float vf = Vector3.Dot(viewerLocal, faceForward);
             int viewerCR = Mathf.FloorToInt(vr / cw);
             int viewerCF = Mathf.FloorToInt(vf / cw);
 
             int faceIdx = GetFaceIndex(faceNormal);
-            int rd = renderDistanceChunks;
-            var toKeep = new HashSet<ChunkCoord>();
+            int rd      = renderDistanceChunks;
+            var toKeep  = new HashSet<ChunkCoord>();
 
             for (int df = -rd; df <= rd; df++)
             for (int dr = -rd; dr <= rd; dr++)
             {
-                int cr = viewerCR + dr;
-                int cf = viewerCF + df;
+                int ci = viewerCR + dr;
+                int cj = viewerCF + df;
 
-                // Centre tangentiel du chunk sur le plan de la face (coordonnées locales)
-                Vector3 tangentialCenter = right   * (cr * cw + cw * 0.5f)
-                                         + forward * (cf * cw + cw * 0.5f);
+                // ── Direction radiale propre à ce chunk ───────────────────────────
+                // Centre tangentiel du chunk sur le plan de la face
+                float tcx = (ci + 0.5f) * cw;
+                float tcz = (cj + 0.5f) * cw;
 
-                // Projette ce point sur la sphère pour obtenir la normale locale
-                // (nécessaire pour les faces non-axiales quand la CubeSphere est déformée).
-                // Pour l'instant on reste sur la face dominante, donc la normale = up.
-                // L'origine du chunk est le coin bas-gauche sur la surface sphérique.
-                Vector3 cornerTangential = right   * (cr * cw)
-                                          + forward * (cf * cw);
+                // Vecteur 3D vers le centre de ce chunk, puis normalisé sur la sphère
+                Vector3 chunkCenterLocal = faceNormal * coreR + faceRight * tcx + faceForward * tcz;
+                Vector3 chunkUp = chunkCenterLocal.normalized;   // axe Y radial du chunk
 
-                // La surface sphérique se trouve à PlanetCoreRadius le long de 'up'
-                // depuis le centre de la planète, dans la direction de la normale.
-                Vector3 chunkOriginLocal = up * PlanetChunkGenerator.PlanetCoreRadius
-                                          + cornerTangential;
-                Vector3 chunkOriginWorld = PlanetCenter + chunkOriginLocal;
+                // Axes tangentiels du chunk, perpendiculaires à chunkUp
+                Vector3 refVec       = Mathf.Abs(Vector3.Dot(chunkUp, Vector3.up)) < 0.9f
+                                       ? Vector3.up : Vector3.forward;
+                Vector3 chunkRight   = Vector3.Cross(chunkUp, refVec).normalized;
+                Vector3 chunkForward = Vector3.Cross(chunkRight, chunkUp).normalized;
 
-                // Clé du chunk — inclut la face pour éviter les collisions
-                ChunkCoord coord = new ChunkCoord(faceIdx, cr, cf);
+                // ── Origine du chunk ──────────────────────────────────────────────
+                // y=0 placé à (coreR - depth) le long de chunkUp → bien sous la surface.
+                // Le coin est décalé de -cw/2 sur right et forward pour centrer le chunk
+                // sur chunkCenterLocal.
+                Vector3 chunkOriginWorld = PlanetCenter
+                    + chunkUp      * (coreR - depth)
+                    + chunkRight   * (-cw * 0.5f)
+                    + chunkForward * (-cw * 0.5f);
+
+                ChunkCoord coord = new ChunkCoord(faceIdx, ci, cj);
                 toKeep.Add(coord);
 
                 if (!_chunks.ContainsKey(coord))
-                    SpawnChunk(coord, chunkOriginWorld, up, right, forward);
+                    SpawnChunk(coord, chunkOriginWorld, chunkUp, chunkRight, chunkForward);
             }
 
             // Décharge les chunks trop loin

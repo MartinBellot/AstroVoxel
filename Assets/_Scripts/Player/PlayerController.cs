@@ -1,12 +1,14 @@
 // ============================================================
 //  PlayerController.cs
-//  Déplacement ZQSD en surface d'une planète sphérique.
-//  Travaille en tandem avec GravityBody (physique) et
-//  PlayerCamera (orientation caméra).
+//  Déplacement ZQSD + WASD en surface planétaire.
+//  Compatible Old Input Manager ET New Input System.
 // ============================================================
 
 using UnityEngine;
 using AstroVoxel.Physics;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace AstroVoxel.Player
 {
@@ -46,7 +48,7 @@ namespace AstroVoxel.Player
         {
             CheckGround();
 
-            if (_isGrounded && Input.GetButtonDown("Jump"))
+            if (_isGrounded && GetJumpDown())
                 Jump();
         }
 
@@ -59,9 +61,8 @@ namespace AstroVoxel.Player
 
         private void Move()
         {
-            // Axes d'entrée (ZQSD configuré dans Input Manager, ou WASD par défaut)
-            float h = Input.GetAxis("Horizontal");  // Q/D ou A/D
-            float v = Input.GetAxis("Vertical");    // Z/S ou W/S
+            float h = GetHorizontal();
+            float v = GetVertical();
 
             if (h == 0f && v == 0f) return;
 
@@ -124,5 +125,43 @@ namespace AstroVoxel.Player
 
         /// <summary>Assigne la caméra après l'initialisation de la scène.</summary>
         public void SetCamera(Transform cam) => cameraTransform = cam;
+
+        // ── Abstraction Input ─────────────────────────────────
+
+        private static float GetHorizontal()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+            if (kb == null) return 0f;
+            float r = kb.dKey.isPressed ? 1f : 0f;
+            float l = (kb.qKey.isPressed || kb.aKey.isPressed) ? 1f : 0f;
+            return r - l;
+#else
+            return Input.GetAxisRaw("Horizontal");
+#endif
+        }
+
+        private static float GetVertical()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+            if (kb == null) return 0f;
+            float fwd = (kb.zKey.isPressed || kb.wKey.isPressed) ? 1f : 0f;
+            float bwd = kb.sKey.isPressed ? 1f : 0f;
+            return fwd - bwd;
+#else
+            return Input.GetAxisRaw("Vertical");
+#endif
+        }
+
+        private static bool GetJumpDown()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+            return kb != null && kb.spaceKey.wasPressedThisFrame;
+#else
+            return Input.GetButtonDown("Jump");
+#endif
+        }
     }
 }

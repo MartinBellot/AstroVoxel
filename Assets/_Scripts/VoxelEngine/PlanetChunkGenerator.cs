@@ -29,6 +29,12 @@ namespace AstroVoxel.VoxelEngine
         /// <summary>Fréquence du bruit de surface (plus petit = collines plus larges).</summary>
         public const float SurfaceFrequency = 0.025f;
 
+        /// <summary>
+        /// Profondeur en blocs en-dessous de la surface où commence le chunk (y=0).
+        /// Doit être > CrustThickness + SurfaceAmplitude pour garantir des blocs solides en bas.
+        /// </summary>
+        public const float ChunkDepthBelowSurface = 18f;  // 12 croûte + 4 amplitude + 2 marge
+
         // ── Point d'entrée ────────────────────────────────────
 
         /// <summary>

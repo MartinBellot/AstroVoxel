@@ -6,6 +6,9 @@
 
 using UnityEngine;
 using AstroVoxel.VoxelEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace AstroVoxel.Player
 {
@@ -38,10 +41,10 @@ namespace AstroVoxel.Player
         {
             UpdateHighlight();
 
-            if (Input.GetMouseButtonDown(0))   // Clic gauche
+            if (GetMouseDown(0))   // Clic gauche
                 TryBreakBlock();
 
-            if (Input.GetMouseButtonDown(1))   // Clic droit
+            if (GetMouseDown(1))   // Clic droit
                 TryPlaceBlock();
 
             // Scroll ou touches pour changer le bloc actif
@@ -111,18 +114,42 @@ namespace AstroVoxel.Player
 
         private void HandleBlockSelection()
         {
+#if ENABLE_INPUT_SYSTEM
+            var mouse = Mouse.current;
+            if (mouse != null)
+            {
+                float scroll = mouse.scroll.y.ReadValue();
+                if (scroll > 0f)  _paletteIndex = (_paletteIndex + 1) % _palette.Length;
+                if (scroll < 0f)  _paletteIndex = (_paletteIndex - 1 + _palette.Length) % _palette.Length;
+            }
+            var kb = Keyboard.current;
+            if (kb != null)
+                for (int i = 0; i < _palette.Length; i++)
+                    if (kb[(Key)(Key.Digit1 + i)].wasPressedThisFrame)
+                        _paletteIndex = i;
+#else
             float scroll = Input.GetAxisRaw("Mouse ScrollWheel");
             if (scroll > 0f)  _paletteIndex = (_paletteIndex + 1) % _palette.Length;
             if (scroll < 0f)  _paletteIndex = (_paletteIndex - 1 + _palette.Length) % _palette.Length;
-            blockToPlace = _palette[_paletteIndex];
 
-            // Touches numériques 1-6
             for (int i = 0; i < _palette.Length; i++)
                 if (Input.GetKeyDown(KeyCode.Alpha1 + i))
-                {
                     _paletteIndex = i;
-                    blockToPlace  = _palette[i];
-                }
+#endif
+            blockToPlace = _palette[_paletteIndex];
+        }
+
+        private static bool GetMouseDown(int button)
+        {
+#if ENABLE_INPUT_SYSTEM
+            var mouse = Mouse.current;
+            if (mouse == null) return false;
+            return button == 0 ? mouse.leftButton.wasPressedThisFrame
+                 : button == 1 ? mouse.rightButton.wasPressedThisFrame
+                 : false;
+#else
+            return Input.GetMouseButtonDown(button);
+#endif
         }
 
         // ── Accesseurs ────────────────────────────────────────
