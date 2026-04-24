@@ -29,6 +29,14 @@ namespace AstroVoxel.Player
         [SerializeField] private float groundCheckRadius   = 0.35f;
         [SerializeField] private float groundCheckDistance = 0.25f;
 
+        [Header("Auto-saut (step-up)")]
+        [Tooltip("Active le saut automatique sur les blocs d'une hauteur.")]
+        [SerializeField] private bool  autoJump          = true;
+        [Tooltip("Distance avant de détection d'une marche (doit dépasser le rayon de la capsule).")]
+        [SerializeField] private float stepDetectDist    = 0.65f;
+        [Tooltip("Hauteur max considérée comme 'une marche' (1 bloc Unity = 1 unité).")]
+        [SerializeField] private float stepHeight        = 1.05f;
+
         [Header("Références")]
         [Tooltip("Transform de la caméra (pour orienter le mouvement).")]
         [SerializeField] private Transform cameraTransform;
@@ -63,6 +71,10 @@ namespace AstroVoxel.Player
 
             if (GetJumpDown() && _coyoteTimer > 0f)
                 _jumpQueued = true;
+
+            // Auto-saut : si on avance vers une marche d'un bloc, sauter automatiquement
+            if (!_jumpQueued && autoJump)
+                CheckAutoJump();
         }
 
         private void FixedUpdate()
@@ -139,6 +151,48 @@ namespace AstroVoxel.Player
                 out _, groundCheckRadius + groundCheckDistance,
                 ~LayerMask.GetMask("Player"),
                 QueryTriggerInteraction.Ignore);
+        }
+
+        // ── Auto-saut ─────────────────────────────────────────
+
+        /// <summary>
+        /// Déclenche un saut automatique lorsque le joueur avance
+        /// droit sur un obstacle d'exactement 1 bloc de hauteur.
+        /// Logique : obstacle présent au niveau des pieds (blockedLow)
+        /// mais espace libre à <see cref="stepHeight"/> (clearHigh).
+        /// </summary>
+        private void CheckAutoJump()
+        {
+            if (!_isGrounded) return;
+
+            float h = GetHorizontal();
+            float v = GetVertical();
+            if (h == 0f && v == 0f) return;
+
+            Vector3 planetUp  = transform.up;
+            Vector3 camFwd    = cameraTransform != null ? cameraTransform.forward : transform.forward;
+            Vector3 forward   = Vector3.ProjectOnPlane(camFwd, planetUp).normalized;
+            Vector3 right     = Vector3.Cross(planetUp, forward).normalized;
+            Vector3 moveDir   = (forward * v + right * h).normalized;
+
+            int mask = ~LayerMask.GetMask("Player");
+
+            // Raycast bas : obstacle juste devant les pieds ?
+            Vector3 lowOrigin = transform.position + planetUp * 0.1f;
+            bool blockedLow   = UnityEngine.Physics.Raycast(
+                lowOrigin, moveDir, stepDetectDist, mask,
+                QueryTriggerInteraction.Ignore);
+
+            if (!blockedLow) return;
+
+            // Raycast haut : passage libre au-dessus de la marche ?
+            Vector3 highOrigin = transform.position + planetUp * stepHeight;
+            bool blockedHigh   = UnityEngine.Physics.Raycast(
+                highOrigin, moveDir, stepDetectDist, mask,
+                QueryTriggerInteraction.Ignore);
+
+            if (!blockedHigh)
+                _jumpQueued = true;
         }
 
         // ── Accesseurs ────────────────────────────────────────

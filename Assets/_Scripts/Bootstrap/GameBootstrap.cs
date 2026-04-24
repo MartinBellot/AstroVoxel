@@ -11,6 +11,7 @@ using UnityEngine.UI;
 using AstroVoxel.VoxelEngine;
 using AstroVoxel.Physics;
 using AstroVoxel.Player;
+using AstroVoxel.Environment;
 
 namespace AstroVoxel.Bootstrap
 {
@@ -49,6 +50,9 @@ namespace AstroVoxel.Bootstrap
 
         private void Awake()
         {
+            // ── Skybox spatiale ───────────────────────────────
+            BuildEnvironment();
+
             var builtMaterials = BuildBlockMaterialArray();
             BuildPlanet(out PlanetWorld world, out GravityAttractor attractor, builtMaterials);
             BuildPlayer(world, attractor, builtMaterials, out Transform playerBody, out Camera playerCam);
@@ -61,6 +65,14 @@ namespace AstroVoxel.Bootstrap
             UnityEngine.Physics.SyncTransforms();
         }
 
+        // ── Construction de l'environnement (skybox) ──────────
+
+        private static void BuildEnvironment()
+        {
+            var envGO = new GameObject("Environment");
+            envGO.AddComponent<SpaceSkyboxController>();
+        }
+
         // ── Construction de la planète ────────────────────────
 
         private void BuildPlanet(out PlanetWorld world, out GravityAttractor attractor, Material[] builtMaterials)
@@ -69,6 +81,10 @@ namespace AstroVoxel.Bootstrap
             planetGO.transform.position = Vector3.zero;
 
             attractor = planetGO.AddComponent<GravityAttractor>();
+
+            // Couche d'ozone : frontière atmosphère / espace
+            // (GravityBody la trouve automatiquement via FindAnyObjectByType)
+            planetGO.AddComponent<OzoneLayer>();
 
             world = planetGO.AddComponent<PlanetWorld>();
             world.planetRadius    = planetRadius;
