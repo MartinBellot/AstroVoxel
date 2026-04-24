@@ -12,6 +12,7 @@ using AstroVoxel.VoxelEngine;
 using AstroVoxel.Physics;
 using AstroVoxel.Player;
 using AstroVoxel.Environment;
+using AstroVoxel.Vehicle;
 
 namespace AstroVoxel.Bootstrap
 {
@@ -63,6 +64,9 @@ namespace AstroVoxel.Bootstrap
             // Injecte le joueur dans les systèmes qui en ont besoin
             sunOrbit.SetPlayer(playerBody);
             BuildAtmosphere(playerBody);
+
+            // Vaisseau spatial (spawn au sol, à côté du joueur)
+            BuildSpaceShip(playerBody, playerCam, world);
 
             world.SetViewer(playerBody);
 
@@ -282,6 +286,120 @@ namespace AstroVoxel.Bootstrap
             hudBuilderGO.transform.SetParent(canvasGO.transform, false);
             var hud = hudBuilderGO.AddComponent<HudBuilder>();
             hud.Init(canvas, blockInteract, playerBody, builtMaterials);
+        }
+
+        // ── Construction du vaisseau spatial ─────────────────
+
+        private static void BuildSpaceShip(Transform playerBody, Camera playerCam, PlanetWorld world)
+        {
+            var shipGO = new GameObject("SpaceShip");
+
+            // Spawn juste au-dessus de la surface, légèrement décalé du joueur
+            float surfaceDist = PlanetChunkGenerator.PlanetCoreRadius + 4f;
+            Vector3 spawnDir  = (Vector3.up * 0.98f + Vector3.right * 0.2f).normalized;
+            shipGO.transform.position = spawnDir * surfaceDist;
+
+            // Orienter le vaisseau tangent à la surface (nez pointe vers +forward planétaire)
+            Vector3 planetUp   = spawnDir;
+            Vector3 shipForward = Vector3.Cross(planetUp, Vector3.forward).normalized;
+            if (shipForward.sqrMagnitude < 0.01f)
+                shipForward = Vector3.Cross(planetUp, Vector3.right).normalized;
+            shipGO.transform.rotation = Quaternion.LookRotation(shipForward, planetUp);
+
+            // Rigidbody
+            var rb                    = shipGO.AddComponent<Rigidbody>();
+            rb.useGravity             = false;
+            rb.freezeRotation         = false;
+            rb.mass                   = 1000f;
+            rb.linearDamping          = 0f;
+            rb.angularDamping         = 1.5f;
+            rb.interpolation          = RigidbodyInterpolation.Interpolate;
+            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+            // Collider fuselage
+            var box    = shipGO.AddComponent<BoxCollider>();
+            box.center = Vector3.zero;
+            box.size   = new Vector3(2f, 1.2f, 5f);
+
+            // ── Modèle visuel (primitives) ───────────────────
+            var model = new GameObject("Model");
+            model.transform.SetParent(shipGO.transform, false);
+
+            AddShipPart(model.transform, PrimitiveType.Cube,     "Hull",
+                Vector3.zero,                  new Vector3(2f,  1f,  5f),  new Color(0.25f, 0.27f, 0.32f));
+            AddShipPart(model.transform, PrimitiveType.Cube,     "WingLeft",
+                new Vector3(-3.5f, -0.2f, 0f), new Vector3(5f,  0.2f, 2.5f), new Color(0.22f, 0.24f, 0.30f));
+            AddShipPart(model.transform, PrimitiveType.Cube,     "WingRight",
+                new Vector3( 3.5f, -0.2f, 0f), new Vector3(5f,  0.2f, 2.5f), new Color(0.22f, 0.24f, 0.30f));
+            AddShipPart(model.transform, PrimitiveType.Cube,     "Cockpit",
+                new Vector3(0f, 0.65f, 1.5f),  new Vector3(1.2f, 0.6f, 1.4f), new Color(0.4f, 0.75f, 1f));
+
+            var engineGO = AddShipPart(model.transform, PrimitiveType.Cylinder, "Engine",
+                new Vector3(0f, 0f, -2.8f),    new Vector3(0.6f, 0.8f, 0.6f), new Color(0.15f, 0.15f, 0.18f));
+            engineGO.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+
+            // ── Caméra 3e personne ───────────────────────────
+            var camGO = new GameObject("ShipCamera");
+            camGO.transform.SetParent(shipGO.transform, false);
+
+            var shipCam             = camGO.AddComponent<Camera>();
+            shipCam.nearClipPlane   = 0.5f;
+            shipCam.farClipPlane    = 2000f;
+            shipCam.fieldOfView     = 65f;
+            shipCam.clearFlags      = CameraClearFlags.Skybox;
+
+            var urp = camGO.GetComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+            if (urp == null)
+                urp = camGO.AddComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+            urp.renderPostProcessing = true;
+
+            camGO.AddComponent<AudioListener>();
+
+            var camScript  = camGO.AddComponent<SpaceShipCamera>();
+            camScript.target = shipGO.transform;
+
+            // Caméra vaisseau inactive au départ (joueur utilise sa propre caméra)
+            camGO.SetActive(false);
+
+            // ── Point de sortie ──────────────────────────────
+            var exit = new GameObject("ExitPoint");
+            exit.transform.SetParent(shipGO.transform, false);
+            exit.transform.localPosition = new Vector3(2.5f, 1.5f, 0f);   // côté droit
+
+            // ── Contrôleur ───────────────────────────────────
+            var ctrl        = shipGO.AddComponent<SpaceShipController>();
+            ctrl.exitPoint  = exit.transform;
+            ctrl.shipCamera = shipCam;
+            ctrl.SetPlayerReferences(playerBody, playerCam);
+            ctrl.SetPlanetWorld(world);
+        }
+
+        private static GameObject AddShipPart(
+            Transform parent,
+            PrimitiveType type,
+            string partName,
+            Vector3 localPos,
+            Vector3 localScale,
+            Color color)
+        {
+            var go = GameObject.CreatePrimitive(type);
+            go.name = partName;
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.transform.localScale    = localScale;
+
+            // Pas de collider sur les pièces visuelles
+            var col = go.GetComponent<Collider>();
+            if (col != null) UnityEngine.Object.Destroy(col);
+
+            var rend = go.GetComponent<Renderer>();
+            if (rend != null)
+            {
+                var mat = CreateDefaultMaterial(color);
+                rend.sharedMaterial = mat;
+            }
+
+            return go;
         }
 
         private static Material CreateDefaultMaterial(Color color)
