@@ -68,13 +68,11 @@ namespace AstroVoxel.VoxelEngine
             int   cs    = VoxelData.ChunkWidth;          // 16
             float coreR = PlanetChunkGenerator.PlanetCoreRadius;
             float amp   = PlanetChunkGenerator.SurfaceAmplitude;
-            float crust = PlanetChunkGenerator.CrustThickness;
 
             // Rayon de la demi-diagonale d'un chunk cubique
             float halfDiag = cs * 0.8660254f; // sqrt(3)/2 * cs
 
-            // Un chunk est "surface" si sa sphère englobante intersecte le shell de terrain
-            float shellMin = coreR - crust - halfDiag;
+            // Limite extérieure : rejeter les chunks entièrement hors de la planète
             float shellMax = coreR + amp + 2f + halfDiag;
 
             // Coordonnées de chunk du viewer
@@ -84,6 +82,7 @@ namespace AstroVoxel.VoxelEngine
             int vcz = Mathf.FloorToInt(vw.z / cs);
 
             int rd      = renderDistanceChunks;
+
             var toKeep  = new HashSet<ChunkCoord>();
 
             for (int dz = -rd; dz <= rd; dz++)
@@ -102,8 +101,9 @@ namespace AstroVoxel.VoxelEngine
 
                 float dist = chunkCenter.magnitude;
 
-                // Ne charger que les chunks qui intersectent le shell de terrain
-                if (dist < shellMin || dist > shellMax) continue;
+                // Ne charger que les chunks dans la planète — l'intérieur est plein
+                // (Stone ou grotte). La boucle ±rd limite déjà la portée autour du joueur.
+                if (dist > shellMax) continue;
 
                 ChunkCoord coord = new ChunkCoord(cx, cy, cz);
                 toKeep.Add(coord);
@@ -137,10 +137,13 @@ namespace AstroVoxel.VoxelEngine
         public Vector3Int WorldToLocalBlock(Vector3 worldPos)
         {
             int cs = VoxelData.ChunkWidth;
+            // Soustrait PlanetCenter pour rester dans le référentiel planète,
+            // cohérent avec WorldToChunkCoord.
+            Vector3 local = worldPos - PlanetCenter;
             ChunkCoord cc = WorldToChunkCoord(worldPos);
-            int bx = Mathf.FloorToInt(worldPos.x);
-            int by = Mathf.FloorToInt(worldPos.y);
-            int bz = Mathf.FloorToInt(worldPos.z);
+            int bx = Mathf.FloorToInt(local.x);
+            int by = Mathf.FloorToInt(local.y);
+            int bz = Mathf.FloorToInt(local.z);
             return new Vector3Int(
                 bx - cc.X * cs,
                 by - cc.Y * cs,
@@ -154,6 +157,7 @@ namespace AstroVoxel.VoxelEngine
             Vector3Int lb = WorldToLocalBlock(worldPos);
             if (!BlockProperties.IsSolid(cr.GetBlock(lb.x, lb.y, lb.z))) return false;
             cr.SetBlock(lb.x, lb.y, lb.z, BlockType.Air);
+            RebuildNeighbourChunks(worldPos);
             return true;
         }
 
@@ -164,10 +168,35 @@ namespace AstroVoxel.VoxelEngine
             Vector3Int lb = WorldToLocalBlock(worldPos);
             if (BlockProperties.IsSolid(cr.GetBlock(lb.x, lb.y, lb.z))) return false;
             cr.SetBlock(lb.x, lb.y, lb.z, type);
+            RebuildNeighbourChunks(worldPos);
             return true;
         }
 
         // ── Interne ───────────────────────────────────────────
+
+        /// <summary>
+        /// Rebuild les chunks voisins qui partagent une face avec le bloc modifié.
+        /// Nécessaire pour que les faces OOB dans le chunk voisin tiennent compte
+        /// des données réelles (blocs cassés/posés) plutôt que du générateur.
+        /// </summary>
+        private void RebuildNeighbourChunks(Vector3 modifiedWorldPos)
+        {
+            ChunkCoord selfCoord = WorldToChunkCoord(modifiedWorldPos);
+
+            for (int face = 0; face < 6; face++)
+            {
+                Vector3 neighbourPos = modifiedWorldPos + new Vector3(
+                    VoxelData.FaceChecks[face, 0],
+                    VoxelData.FaceChecks[face, 1],
+                    VoxelData.FaceChecks[face, 2]);
+
+                ChunkCoord neighbourCoord = WorldToChunkCoord(neighbourPos);
+                if (neighbourCoord.Equals(selfCoord)) continue;  // même chunk, déjà rebuild
+
+                if (_chunks.TryGetValue(neighbourCoord, out ChunkRenderer neighbour))
+                    neighbour.RebuildMesh();
+            }
+        }
 
         private void SpawnChunk(ChunkCoord coord)
         {
@@ -187,7 +216,7 @@ namespace AstroVoxel.VoxelEngine
                 : new Material(Shader.Find("Universal Render Pipeline/Lit"));
 
             var cr = go.AddComponent<ChunkRenderer>();
-            cr.InitFromWorld(worldPos, PlanetCenter, blockMaterials);
+            cr.InitFromWorld(worldPos, PlanetCenter, this, blockMaterials);
 
             _chunks[coord] = cr;
         }

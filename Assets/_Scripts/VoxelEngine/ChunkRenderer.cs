@@ -5,6 +5,7 @@
 //  + 1 MeshCollider. Zéro Instantiate de blocs.
 // ============================================================
 
+using System;
 using UnityEngine;
 
 namespace AstroVoxel.VoxelEngine
@@ -33,6 +34,7 @@ namespace AstroVoxel.VoxelEngine
         // ── Mode monde planétaire ─────────────────────────────
         private Vector3    _planetCenter;
         private Material[] _blockMaterials;   // index = (byte)BlockType
+        private PlanetWorld _world;           // référence pour la lookup des voisins réels
 
         // ── Inspector (mode plat standalone) ─────────────────
         [Header("Génération du terrain (mode standalone)")]
@@ -84,10 +86,11 @@ namespace AstroVoxel.VoxelEngine
         /// Initialise ce chunk en mode planétaire (grille 3D axis-aligned).
         /// Appelé par <see cref="PlanetWorld"/> juste après AddComponent.
         /// </summary>
-        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter, Material[] blockMaterials = null)
+        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter, PlanetWorld world, Material[] blockMaterials = null)
         {
             _planetCenter   = planetCenter;
             _blockMaterials = blockMaterials;
+            _world          = world;
 
             // Awake peut ne pas encore avoir été appelé si AddComponent vient de se faire
             if (_mesh == null)
@@ -106,6 +109,31 @@ namespace AstroVoxel.VoxelEngine
         }
 
         // ── Génération ────────────────────────────────────────
+
+        /// <summary>
+        /// Délégué passé à ChunkMeshBuilder pour résoudre les voxels hors-chunk.
+        /// Interroge les données RÉELLES du chunk voisin chargé (incluant les
+        /// modifications du joueur). Repli sur le générateur si non chargé.
+        /// Paramètres : coordonnées locales OOB (peuvent être négatives ou >= Width).
+        /// </summary>
+        private byte GetNeighbourForMesh(int lx, int ly, int lz)
+        {
+            // Convertit coords locales OOB → position world du centre du voxel
+            Vector3 worldPos = transform.position + new Vector3(lx + 0.5f, ly + 0.5f, lz + 0.5f);
+
+            if (_world != null)
+            {
+                ChunkRenderer neighbour = _world.GetChunkAt(worldPos);
+                if (neighbour != null)
+                {
+                    Vector3Int lb = _world.WorldToLocalBlock(worldPos);
+                    return neighbour.GetBlock(lb.x, lb.y, lb.z);
+                }
+            }
+
+            // Chunk voisin non chargé → repli sur le générateur
+            return PlanetChunkGenerator.GetBlockType(worldPos, _planetCenter);
+        }
 
         /// <summary>
         /// Remplit le ChunkData : <see cref="solidLayers"/> couches de blocs
@@ -132,11 +160,13 @@ namespace AstroVoxel.VoxelEngine
 
         /// <summary>
         /// Recalcule le mesh à partir des données et l'applique aux composants.
+        /// Public pour permettre à PlanetWorld de forcer le rebuild des chunks voisins
+        /// après une modification de bloc en bordure de chunk.
         /// </summary>
-        private void RebuildMesh()
+        public void RebuildMesh()
         {
             _meshData.Clear();
-            ChunkMeshBuilder.Build(_chunkData, _meshData, transform.position, _planetCenter);
+            ChunkMeshBuilder.Build(_chunkData, _meshData, GetNeighbourForMesh);
 
             int subCount = _meshData.Triangles.Length;
 

@@ -105,10 +105,6 @@ namespace AstroVoxel.Player
             rootRT.anchoredPosition = new Vector2(10f, -10f);
             rootRT.sizeDelta        = new Vector2(300f, 72f);
 
-            // Fond semi-transparent
-            var bg    = rootGO.AddComponent<Image>();
-            bg.color  = new Color(0f, 0f, 0f, 0.45f);
-
             // Trois lignes
             _fpsText   = CreateLine(rootGO.transform, 0, "FPS: …");
             _posText   = CreateLine(rootGO.transform, 1, "XYZ: …");
@@ -132,12 +128,12 @@ namespace AstroVoxel.Player
 
             var txt = go.AddComponent<Text>();
             txt.text      = initial;
-            txt.fontSize  = 13;
-            txt.color     = Color.white;
+            txt.fontSize  = 16;
+            txt.color     = Color.black;
             txt.alignment = TextAnchor.MiddleLeft;
 
             var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            if (font == null) font = Font.CreateDynamicFontFromOSFont("Arial", 13);
+            if (font == null) font = Font.CreateDynamicFontFromOSFont("Arial", 16);
             txt.font = font;
 
             // Ombre portée pour lisibilité sur fond clair

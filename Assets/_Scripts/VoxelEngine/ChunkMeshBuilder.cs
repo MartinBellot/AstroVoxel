@@ -5,6 +5,7 @@
 //  Retourne un MeshData (struct) que le thread principal applique.
 // ============================================================
 
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -58,11 +59,13 @@ namespace AstroVoxel.VoxelEngine
         /// Remplit <paramref name="output"/> avec la géométrie visible du Chunk.
         /// Appeler <see cref="MeshData.Clear"/> avant si réutilisation.
         /// </summary>
-        /// <param name="chunkOrigin">Coin (0,0,0) du chunk en world-space. Nécessaire pour
-        /// le culling inter-chunks : les voisins OOB sont interrogés via le générateur.</param>
-        /// <param name="planetCenter">Centre de la planète. Transmis au générateur pour OOB.</param>
+        /// <param name="getNeighbour">
+        /// Délégué appelé pour les voxels hors-chunk (coordonnées locales OOB).
+        /// Doit retourner le type de bloc réel du chunk voisin chargé,
+        /// ou le type généré si ce chunk n'est pas encore chargé.
+        /// </param>
         public static void Build(ChunkData data, MeshData output,
-                                 Vector3 chunkOrigin, Vector3 planetCenter)
+                                 Func<int, int, int, byte> getNeighbour)
         {
             int width  = data.Width;
             int height = data.Height;
@@ -84,17 +87,14 @@ namespace AstroVoxel.VoxelEngine
                     byte neighbour;
                     if (data.IsInBounds(nx, ny, nz))
                     {
-                        // Voisin dans le même chunk
+                        // Voisin dans le même chunk → lecture directe (données réelles)
                         neighbour = data.GetBlock(nx, ny, nz);
                     }
                     else
                     {
-                        // Voisin hors chunk : interroge le générateur directement.
-                        // Résultat identique à ce qu'aurait généré le chunk voisin.
-                        // → Culling inter-chunks correct sans coordination runtime.
-                        Vector3 worldPos = chunkOrigin
-                            + new Vector3(nx + 0.5f, ny + 0.5f, nz + 0.5f);
-                        neighbour = PlanetChunkGenerator.GetBlockType(worldPos, planetCenter);
+                        // Voisin hors-chunk → délégué : interroge le chunk voisin chargé
+                        // (données réelles incluant les modifications du joueur).
+                        neighbour = getNeighbour(nx, ny, nz);
                     }
 
                     if (BlockProperties.IsSolid(neighbour)) continue;

@@ -25,6 +25,17 @@ namespace AstroVoxel.VoxelEngine
         /// <summary>Fréquence spatiale du bruit de terrain.</summary>
         public const float SurfaceFrequency = 0.03f;
 
+        // ── Paramètres des grottes ────────────────────────────
+
+        /// <summary>Fréquence spatiale du bruit de grotte (plus petit = tunnels plus larges).</summary>
+        public const float CaveFrequency = 0.04f;
+
+        /// <summary>
+        /// Seuil du bruit de grotte : un voxel devient Air si le bruit dépasse ce seuil.
+        /// Plage utile : 0.80–0.92 (plus bas = plus de grottes).
+        /// </summary>
+        public const float CaveThreshold = 0.84f;
+
         // ── Méthode centrale partagée ─────────────────────────
 
         /// <summary>
@@ -54,10 +65,40 @@ namespace AstroVoxel.VoxelEngine
 
             float surfaceRadius = PlanetCoreRadius + SurfaceAmplitude * (noise - 0.5f);
 
-            if      (dist > surfaceRadius + 0.5f) return (byte)BlockType.Air;
-            else if (dist > surfaceRadius - 0.5f) return (byte)BlockType.Grass;
-            else if (dist > surfaceRadius - 3.5f) return (byte)BlockType.Dirt;
-            else                                  return (byte)BlockType.Stone;
+            // Les grottes s'appliquent à TOUS les blocs solides (y compris surface)
+            // pour que les tunnels débouchent naturellement en surface.
+            bool cave = IsCave(worldPos);
+
+            if (dist > surfaceRadius + 0.5f) return (byte)BlockType.Air;
+            if (dist > surfaceRadius - 0.5f) return cave ? (byte)BlockType.Air : (byte)BlockType.Grass;
+            if (dist > surfaceRadius - 3.5f) return cave ? (byte)BlockType.Air : (byte)BlockType.Dirt;
+            if (cave)                        return (byte)BlockType.Air;
+            return (byte)BlockType.Stone;
+        }
+
+        // ── Bruit de grotte ───────────────────────────────────
+
+        /// <summary>
+        /// Retourne true si la position world est à l'intérieur d'une grotte.
+        /// Utilise deux plans de bruit de Perlin 2D pour approximer un bruit 3D.
+        /// La multiplication des deux valeurs crée des tunnels naturels : seules
+        /// les zones où LES DEUX bruits sont élevés simultanément forment des galeries.
+        /// Un second octave à fréquence double ajoute du détail de forme.
+        /// </summary>
+        private static bool IsCave(Vector3 p)
+        {
+            float f = CaveFrequency;
+
+            // Plan XY et plan YZ — décalages pour éviter la corrélation entre axes
+            float a = Mathf.PerlinNoise(p.x * f + 500f, p.y * f + 500f);
+            float b = Mathf.PerlinNoise(p.y * f + 700f, p.z * f + 700f);
+
+            // Second octave pour du détail (tunnels moins rectilignes)
+            float c = Mathf.PerlinNoise(p.x * f * 2f + 900f, p.z * f * 2f + 900f);
+
+            float noise = a * b + 0.15f * c;
+
+            return noise > CaveThreshold;
         }
 
         // ── Remplissage d'un chunk complet ────────────────────
