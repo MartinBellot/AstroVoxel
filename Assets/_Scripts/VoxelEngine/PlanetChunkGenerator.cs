@@ -18,7 +18,7 @@ namespace AstroVoxel.VoxelEngine
         // ── Paramètres de génération ──────────────────────────
 
         /// <summary>Rayon intérieur de la planète en blocs (core plein).</summary>
-        public const float PlanetCoreRadius = 60f;
+        public const float PlanetCoreRadius = 100f;
 
         /// <summary>Épaisseur de la croûte (blocs de terrain au-dessus du core).</summary>
         public const int CrustThickness = 12;
@@ -33,7 +33,7 @@ namespace AstroVoxel.VoxelEngine
         /// Profondeur en blocs en-dessous de la surface où commence le chunk (y=0).
         /// Doit être > CrustThickness + SurfaceAmplitude pour garantir des blocs solides en bas.
         /// </summary>
-        public const float ChunkDepthBelowSurface = 18f;  // 12 croûte + 4 amplitude + 2 marge
+        public const float ChunkDepthBelowSurface = 22f;  // 12 croûte + 4 amplitude + 6 marge
 
         // ── Point d'entrée ────────────────────────────────────
 

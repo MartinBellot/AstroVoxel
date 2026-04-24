@@ -21,7 +21,7 @@ namespace AstroVoxel.Bootstrap
     {
         // ── Inspector ─────────────────────────────────────────
         [Header("Planète")]
-        [SerializeField] private float planetRadius = 80f;
+        [SerializeField] private float planetRadius = 110f;
 
         [Header("Joueur")]
         [SerializeField] private float playerHeight  = 1.8f;
