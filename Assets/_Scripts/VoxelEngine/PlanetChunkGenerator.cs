@@ -81,6 +81,177 @@ namespace AstroVoxel.VoxelEngine
                 Vector3 blockPos = chunkOriginWorld + new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
                 data.SetBlock(x, y, z, GetBlockType(blockPos, planetCenter));
             }
+
+            PlaceTrees(data, chunkOriginWorld, planetCenter);
+        }
+
+        // ── Génération des arbres ─────────────────────────────
+
+        private const int   TreeCellSize     = 8;
+        private const int   MinTrunkHeight   = 3;
+        private const int   MaxTrunkHeight   = 6;
+        private const int   MinCanopyRadius  = 2;
+        private const int   MaxCanopyRadius  = 3;
+        // Probabilité d'arbre : 1 cellule sur 3
+        private const int   TreeSpawnRatio   = 3;
+
+        /// <summary>
+        /// Place des arbres déterministes dans le chunk courant.
+        /// On itère sur les cellules de grille voisines pouvant déborder dans ce chunk.
+        /// </summary>
+        private static void PlaceTrees(ChunkData data, Vector3 chunkOrigin, Vector3 planetCenter)
+        {
+            int S = TreeCellSize;
+            int expand = MaxTrunkHeight + MaxCanopyRadius + S;
+
+            int gcMinX = Mathf.FloorToInt((chunkOrigin.x - expand) / S);
+            int gcMaxX = Mathf.CeilToInt ((chunkOrigin.x + data.Width  + expand) / S);
+            int gcMinY = Mathf.FloorToInt((chunkOrigin.y - expand) / S);
+            int gcMaxY = Mathf.CeilToInt ((chunkOrigin.y + data.Height + expand) / S);
+            int gcMinZ = Mathf.FloorToInt((chunkOrigin.z - expand) / S);
+            int gcMaxZ = Mathf.CeilToInt ((chunkOrigin.z + data.Width  + expand) / S);
+
+            for (int gx = gcMinX; gx <= gcMaxX; gx++)
+            for (int gy = gcMinY; gy <= gcMaxY; gy++)
+            for (int gz = gcMinZ; gz <= gcMaxZ; gz++)
+            {
+                int hash = HashTreeCell(gx, gy, gz);
+
+                // Seulement 1 cellule sur TreeSpawnRatio génère un arbre
+                if ((hash % TreeSpawnRatio) != 0) continue;
+
+                // Centre de la cellule en world
+                float cx = (gx + 0.5f) * S;
+                float cy = (gy + 0.5f) * S;
+                float cz = (gz + 0.5f) * S;
+
+                float distFromCenter = Mathf.Sqrt(
+                    (cx - planetCenter.x) * (cx - planetCenter.x) +
+                    (cy - planetCenter.y) * (cy - planetCenter.y) +
+                    (cz - planetCenter.z) * (cz - planetCenter.z));
+
+                // Seules les cellules proches de la surface peuvent porter un arbre
+                float surfMin = PlanetCoreRadius - 2f;
+                float surfMax = PlanetCoreRadius + SurfaceAmplitude + 6f;
+                if (distFromCenter < surfMin || distFromCenter > surfMax) continue;
+
+                // Direction radiale (vers l'extérieur de la planète)
+                float ddx = cx - planetCenter.x;
+                float ddy = cy - planetCenter.y;
+                float ddz = cz - planetCenter.z;
+                float inv = 1f / distFromCenter;
+                Vector3 up = new Vector3(ddx * inv, ddy * inv, ddz * inv);
+
+                // Trouver la surface réelle au-dessus du centre de cellule
+                // On cherche le premier bloc Grass depuis distFromCenter en descente radiale
+                Vector3 searchBase = FindSurfaceBlock(planetCenter, up);
+                if (searchBase == Vector3.positiveInfinity) continue;
+
+                // Vérifier que ce bloc est bien dans ou proche du chunk
+                // (perf : skip si trop loin pour affecter ce chunk)
+                int bx = Mathf.FloorToInt(searchBase.x);
+                int by = Mathf.FloorToInt(searchBase.y);
+                int bz = Mathf.FloorToInt(searchBase.z);
+
+                // Paramètres de l'arbre depuis le hash
+                int trunkH    = MinTrunkHeight + (int)((uint)hash >> 4)  % (MaxTrunkHeight  - MinTrunkHeight  + 1);
+                int canopyR   = MinCanopyRadius + (int)((uint)hash >> 8)  % (MaxCanopyRadius - MinCanopyRadius + 1);
+
+                // Tronc en bois : DDA pas fin (0.45) → tous les blocs se touchent
+                // Un pas < 0.5 garantit qu'on ne rate aucun franchissement de grille
+                // même sur une direction purement diagonale.
+                {
+                    const float dda = 0.45f;
+                    int steps = Mathf.CeilToInt(trunkH / dda);
+                    int prevTx = int.MinValue, prevTy = int.MinValue, prevTz = int.MinValue;
+                    for (int s = 1; s <= steps; s++)
+                    {
+                        float t  = Mathf.Min(s * dda, (float)trunkH);
+                        int   tx = Mathf.FloorToInt(searchBase.x + up.x * t);
+                        int   ty = Mathf.FloorToInt(searchBase.y + up.y * t);
+                        int   tz = Mathf.FloorToInt(searchBase.z + up.z * t);
+                        if (tx == prevTx && ty == prevTy && tz == prevTz) continue;
+                        TrySetBlock(data, chunkOrigin, tx, ty, tz, (byte)BlockType.Wood, overwrite: true);
+                        prevTx = tx; prevTy = ty; prevTz = tz;
+                    }
+                }
+
+                // Canopy de feuilles en haut du tronc
+                Vector3 canopyCenter = new Vector3(
+                    searchBase.x + up.x * (trunkH + 0.5f),
+                    searchBase.y + up.y * (trunkH + 0.5f),
+                    searchBase.z + up.z * (trunkH + 0.5f));
+
+                int cr = canopyR;
+                for (int lx = -cr; lx <= cr; lx++)
+                for (int ly = -cr; ly <= cr; ly++)
+                for (int lz = -cr; lz <= cr; lz++)
+                {
+                    if (lx * lx + ly * ly + lz * lz > cr * cr) continue;
+                    int wx = Mathf.FloorToInt(canopyCenter.x) + lx;
+                    int wy = Mathf.FloorToInt(canopyCenter.y) + ly;
+                    int wz = Mathf.FloorToInt(canopyCenter.z) + lz;
+                    TrySetBlock(data, chunkOrigin, wx, wy, wz, (byte)BlockType.Leaves, overwrite: false);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Cherche le premier bloc Grass/Dirt/Stone sur la surface de la planète
+        /// en descendant depuis l'extérieur dans la direction <paramref name="up"/>.
+        /// Retourne la position world du centre de ce bloc, ou +infinity si non trouvé.
+        /// </summary>
+        private static Vector3 FindSurfaceBlock(Vector3 planetCenter, Vector3 up)
+        {
+            float maxR = PlanetCoreRadius + SurfaceAmplitude + 4f;
+            float minR = PlanetCoreRadius - 2f;
+
+            // Recherche grossière : on part de maxR et descend par pas de 1
+            for (float r = maxR; r >= minR; r -= 1f)
+            {
+                Vector3 worldPos = planetCenter + up * r;
+                byte bt = GetBlockType(worldPos, planetCenter);
+                if (bt == (byte)BlockType.Grass)
+                    return worldPos;
+            }
+            return Vector3.positiveInfinity;
+        }
+
+        /// <summary>
+        /// Tente de placer un bloc en coordonnées world dans ce chunk.
+        /// Si <paramref name="overwrite"/> est false, ne remplace pas Air uniquement.
+        /// </summary>
+        private static void TrySetBlock(
+            ChunkData data, Vector3 chunkOrigin,
+            int wx, int wy, int wz,
+            byte blockId, bool overwrite)
+        {
+            int lx = wx - Mathf.FloorToInt(chunkOrigin.x);
+            int ly = wy - Mathf.FloorToInt(chunkOrigin.y);
+            int lz = wz - Mathf.FloorToInt(chunkOrigin.z);
+
+            if (lx < 0 || lx >= data.Width  ||
+                ly < 0 || ly >= data.Height  ||
+                lz < 0 || lz >= data.Width)
+                return;
+
+            if (!overwrite && data.GetBlock(lx, ly, lz) != (byte)BlockType.Air)
+                return;
+
+            data.SetBlock(lx, ly, lz, blockId);
+        }
+
+        /// <summary>Hash déterministe d'une cellule de grille.</summary>
+        private static int HashTreeCell(int x, int y, int z)
+        {
+            unchecked
+            {
+                int h = (x * 1000003) ^ (y * 2000003) ^ (z * 3000003);
+                h ^= h >> 13;
+                h *= 1540483477;
+                h ^= h >> 15;
+                return (int)((uint)h & 0x7FFFFFFF);
+            }
         }
     }
 }

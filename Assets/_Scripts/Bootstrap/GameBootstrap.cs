@@ -49,8 +49,9 @@ namespace AstroVoxel.Bootstrap
 
         private void Awake()
         {
-            BuildPlanet(out PlanetWorld world, out GravityAttractor attractor);
-            BuildPlayer(world, attractor, out Transform playerBody, out Camera playerCam);
+            var builtMaterials = BuildBlockMaterialArray();
+            BuildPlanet(out PlanetWorld world, out GravityAttractor attractor, builtMaterials);
+            BuildPlayer(world, attractor, builtMaterials, out Transform playerBody, out Camera playerCam);
 
             world.SetViewer(playerBody);
 
@@ -62,18 +63,16 @@ namespace AstroVoxel.Bootstrap
 
         // ── Construction de la planète ────────────────────────
 
-        private void BuildPlanet(out PlanetWorld world, out GravityAttractor attractor)
+        private void BuildPlanet(out PlanetWorld world, out GravityAttractor attractor, Material[] builtMaterials)
         {
             var planetGO = new GameObject("Planet");
             planetGO.transform.position = Vector3.zero;
 
-            // GravityAttractor
             attractor = planetGO.AddComponent<GravityAttractor>();
 
-            // PlanetWorld
             world = planetGO.AddComponent<PlanetWorld>();
             world.planetRadius    = planetRadius;
-            world.blockMaterials  = BuildBlockMaterialArray();
+            world.blockMaterials  = builtMaterials;
         }
 
         /// <summary>
@@ -103,6 +102,7 @@ namespace AstroVoxel.Bootstrap
         private void BuildPlayer(
             PlanetWorld world,
             GravityAttractor attractor,
+            Material[] builtMaterials,
             out Transform playerBody,
             out Camera playerCam)
         {
@@ -172,7 +172,7 @@ namespace AstroVoxel.Bootstrap
             blockInteract.InitHighlight(highlight);
 
             // ── HUD : crosshair + hotbar + overlay ────────────────
-            BuildHUD(blockInteract, playerGO.transform);
+            BuildHUD(blockInteract, playerGO.transform, builtMaterials);
         }
 
         private static void CreateCrosshairBar(Transform parent, Vector2 size)
@@ -220,7 +220,7 @@ namespace AstroVoxel.Bootstrap
 
         // ── HUD ─────────────────────────────────────────────
 
-        private static void BuildHUD(BlockInteraction blockInteract, Transform playerBody)
+        private static void BuildHUD(BlockInteraction blockInteract, Transform playerBody, Material[] builtMaterials)
         {
             // Canvas Screen Space Overlay
             var canvasGO = new GameObject("HUD");
@@ -234,8 +234,8 @@ namespace AstroVoxel.Bootstrap
             CreateCrosshairBar(canvasGO.transform, new Vector2(20f, 2f));
             CreateCrosshairBar(canvasGO.transform, new Vector2(2f, 20f));
 
-            // Hotbar (slots + label)
-            blockInteract.InitHotbar(canvas);
+            // Hotbar (slots + label) avec les vrais matériaux
+            blockInteract.InitHotbar(canvas, builtMaterials);
 
             // Overlay FPS / XYZ / Bloc
             var hudGO = new GameObject("HudOverlay");

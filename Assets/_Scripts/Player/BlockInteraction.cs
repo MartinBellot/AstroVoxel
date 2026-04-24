@@ -37,10 +37,11 @@ namespace AstroVoxel.Player
         [SerializeField] private Transform blockHighlight;   // cube semi-transparent
 
         // ── HUD Hotbar ────────────────────────────────────────
-        private Image[]  _hotbarIcons;
-        private Image[]  _hotbarBorders;
-        private Text     _blockNameText;
-        private int      _lastPaletteIndex = -1;
+        private RawImage[] _hotbarIcons;
+        private Image[]    _hotbarBorders;
+        private Text       _blockNameText;
+        private int        _lastPaletteIndex = -1;
+        private Material[] _blockMaterials;
 
         // ── Cycle de vie ──────────────────────────────────────
 
@@ -195,21 +196,15 @@ namespace AstroVoxel.Player
         }
 
         // ── Couleurs de la palette ────────────────────────────
-        private static readonly Color[] PaletteColors =
-        {
-            new Color(0.55f, 0.55f, 0.55f),   // Stone
-            new Color(0.55f, 0.35f, 0.15f),   // Dirt
-            new Color(0.30f, 0.65f, 0.20f),   // Grass
-            new Color(0.90f, 0.85f, 0.45f),   // Sand
-            new Color(0.60f, 0.40f, 0.20f),   // Wood
-            new Color(0.18f, 0.48f, 0.12f),   // Leaves
-        };
+        // Remplacé par ApplyMaterialToIcon + GetFallbackColor.
 
         /// <summary>
         /// Crée la hotbar (6 slots) dans le canvas fourni par GameBootstrap.
         /// </summary>
-        public void InitHotbar(Canvas canvas)
+        public void InitHotbar(Canvas canvas, Material[] blockMaterials = null)
         {
+            _blockMaterials = blockMaterials;
+
             int   count    = _palette.Length;
             float slotSize = 52f;
             float gap      = 4f;
@@ -225,17 +220,17 @@ namespace AstroVoxel.Player
             rootRT.anchoredPosition = new Vector2(0f, 12f);
             rootRT.sizeDelta        = new Vector2(totalW, slotSize);
 
-            _hotbarIcons   = new Image[count];
+            _hotbarIcons   = new RawImage[count];
             _hotbarBorders = new Image[count];
 
             for (int i = 0; i < count; i++)
             {
                 float xPos = i * (slotSize + gap);
 
-                // Bordure (fond sombre + outline blanc si sélectionné)
+                // Bordure
                 var borderGO = CreateUIRect("Slot_Border_" + i, rootGO.transform,
                     new Vector2(xPos, 0f), new Vector2(slotSize, slotSize),
-                    new Color(1f, 1f, 1f, 0f));           // transparent par défaut
+                    new Color(1f, 1f, 1f, 0f));
                 _hotbarBorders[i] = borderGO.GetComponent<Image>();
 
                 // Fond du slot
@@ -243,14 +238,22 @@ namespace AstroVoxel.Player
                     new Vector2(0f, 0f), new Vector2(slotSize - 4f, slotSize - 4f),
                     new Color(0.1f, 0.1f, 0.1f, 0.75f));
 
-                // Icône colorée du bloc
-                var iconGO = CreateUIRect("Slot_Icon_" + i, borderGO.transform,
-                    new Vector2(0f, 0f), new Vector2(slotSize - 10f, slotSize - 10f),
-                    i < PaletteColors.Length ? PaletteColors[i] : Color.white);
-                _hotbarIcons[i] = iconGO.GetComponent<Image>();
+                // Icône : RawImage affichant la texture ou la couleur du matériau
+                var iconGO = new GameObject("Slot_Icon_" + i);
+                iconGO.transform.SetParent(borderGO.transform, false);
+                var iconRT = iconGO.AddComponent<RectTransform>();
+                iconRT.anchorMin        = new Vector2(0.5f, 0.5f);
+                iconRT.anchorMax        = new Vector2(0.5f, 0.5f);
+                iconRT.pivot            = new Vector2(0.5f, 0.5f);
+                iconRT.sizeDelta        = new Vector2(slotSize - 10f, slotSize - 10f);
+                iconRT.anchoredPosition = Vector2.zero;
+
+                var rawImg = iconGO.AddComponent<RawImage>();
+                ApplyMaterialToIcon(rawImg, _palette[i]);
+                _hotbarIcons[i] = rawImg;
             }
 
-            // Label du bloc actif (au-dessus de la hotbar)
+            // Label du bloc actif
             var labelGO = new GameObject("BlockNameLabel");
             labelGO.transform.SetParent(canvas.transform, false);
             var labelRT = labelGO.AddComponent<RectTransform>();
@@ -268,8 +271,43 @@ namespace AstroVoxel.Player
             if (font == null) font = Font.CreateDynamicFontFromOSFont("Arial", 14);
             _blockNameText.font = font;
 
-            // Dessine l'état initial
             UpdateHotbarVisuals();
+        }
+
+        private void ApplyMaterialToIcon(RawImage icon, BlockType blockType)
+        {
+            int idx = (int)blockType;
+            Material mat = (_blockMaterials != null && idx >= 0 && idx < _blockMaterials.Length)
+                ? _blockMaterials[idx] : null;
+
+            if (mat != null && mat.mainTexture is Texture2D texAny)
+            {
+                icon.texture = texAny;
+                icon.color   = Color.white;
+                return;
+            }
+
+            // Couleur solid : depuis le matériau ou fallback
+            Color col = mat != null ? mat.color : GetFallbackColor(blockType);
+            var solidTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            solidTex.SetPixel(0, 0, col);
+            solidTex.Apply();
+            icon.texture = solidTex;
+            icon.color   = Color.white;
+        }
+
+        private static Color GetFallbackColor(BlockType t)
+        {
+            switch (t)
+            {
+                case BlockType.Stone:  return new Color(0.55f, 0.55f, 0.55f);
+                case BlockType.Dirt:   return new Color(0.55f, 0.35f, 0.15f);
+                case BlockType.Grass:  return new Color(0.30f, 0.65f, 0.20f);
+                case BlockType.Sand:   return new Color(0.90f, 0.85f, 0.45f);
+                case BlockType.Wood:   return new Color(0.60f, 0.40f, 0.20f);
+                case BlockType.Leaves: return new Color(0.18f, 0.48f, 0.12f);
+                default: return Color.gray;
+            }
         }
 
         private void UpdateHotbarVisuals()
@@ -282,13 +320,12 @@ namespace AstroVoxel.Player
                     ? new Color(1f, 1f, 1f, 1f)
                     : new Color(0.3f, 0.3f, 0.3f, 0.85f);
 
-                // Légère mise en avant de l'icône sélectionnée
                 if (_hotbarIcons != null && i < _hotbarIcons.Length)
                 {
-                    var c = _hotbarIcons[i].color;
-                    _hotbarIcons[i].color = selected
-                        ? new Color(c.r, c.g, c.b, 1.0f)
-                        : new Color(c.r, c.g, c.b, 0.65f);
+                    var img = _hotbarIcons[i];
+                    img.color = selected
+                        ? Color.white
+                        : new Color(0.65f, 0.65f, 0.65f, 1f);
                 }
             }
 
