@@ -5,13 +5,26 @@
 //  C'est le seul MonoBehaviour à placer manuellement.
 // ============================================================
 
+using System;
 using UnityEngine;
+using UnityEngine.UI;
 using AstroVoxel.VoxelEngine;
 using AstroVoxel.Physics;
 using AstroVoxel.Player;
 
 namespace AstroVoxel.Bootstrap
 {
+    /// <summary>
+    /// Association d'un type de bloc à son matériau Unity.
+    /// Renseigner dans l'Inspector du Bootstrap.
+    /// </summary>
+    [Serializable]
+    public struct BlockMaterialEntry
+    {
+        public BlockType blockType;
+        public Material  material;
+    }
+
     /// <summary>
     /// Point d'entrée de la scène.
     /// Construit la hiérarchie complète : Planète → Joueur → Caméra.
@@ -28,8 +41,9 @@ namespace AstroVoxel.Bootstrap
         [SerializeField] private float playerRadius  = 0.4f;
         [SerializeField] private float spawnAltitude = 10f;   // blocs au-dessus de la surface
 
-        [Header("Matériau des chunks (optionnel)")]
-        [SerializeField] private Material chunkMaterial;
+        [Header("Matériaux par bloc")]
+        [Tooltip("Un entrée par type de bloc. Les types non renseignés reçoivent un matériau gris par défaut.")]
+        [SerializeField] private BlockMaterialEntry[] blockMaterials;
 
         // ── Cycle de vie ──────────────────────────────────────
 
@@ -58,10 +72,30 @@ namespace AstroVoxel.Bootstrap
 
             // PlanetWorld
             world = planetGO.AddComponent<PlanetWorld>();
-            world.planetRadius         = planetRadius;
-            world.chunkMaterial        = chunkMaterial != null
-                ? chunkMaterial
-                : CreateDefaultMaterial();
+            world.planetRadius    = planetRadius;
+            world.blockMaterials  = BuildBlockMaterialArray();
+        }
+
+        /// <summary>
+        /// Assemble un tableau Material[] indexé par (byte)BlockType.
+        /// Les types non renseignés reçoivent un matériau gris par défaut.
+        /// </summary>
+        private Material[] BuildBlockMaterialArray()
+        {
+            int count = Enum.GetValues(typeof(BlockType)).Length;
+            var mats  = new Material[count];
+
+            // Remplit tout avec un matériau gris par défaut
+            for (int i = 0; i < count; i++)
+                mats[i] = CreateDefaultMaterial(new Color(0.5f, 0.45f, 0.4f));
+
+            // Surcharge avec les matériaux assignés dans l'Inspector
+            if (blockMaterials != null)
+                foreach (var entry in blockMaterials)
+                    if (entry.material != null)
+                        mats[(int)entry.blockType] = entry.material;
+
+            return mats;
         }
 
         // ── Construction du joueur ────────────────────────────
@@ -132,15 +166,128 @@ namespace AstroVoxel.Bootstrap
             controller.SetCamera(cameraGO.transform);
 
             playerBody = playerGO.transform;
+
+            // ── Cube de sélection 3D (à la Minecraft) ───────────────
+            var highlight = BuildBlockHighlight();
+            blockInteract.InitHighlight(highlight);
+
+            // ── HUD : crosshair + hotbar + overlay ────────────────
+            BuildHUD(blockInteract, playerGO.transform);
         }
 
-        // ── Utilitaires ───────────────────────────────────────
+        private static void CreateCrosshairBar(Transform parent, Vector2 size)
+        {
+            var go  = new GameObject("CrosshairBar");
+            go.transform.SetParent(parent, false);
 
-        private static Material CreateDefaultMaterial()
+            var img  = go.AddComponent<Image>();
+            img.color = new Color(1f, 1f, 1f, 0.85f);
+
+            var rt   = go.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot     = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = size;
+            rt.anchoredPosition = Vector2.zero;
+        }
+
+        private void BuildPlayerInternal() { } // dummy pour fermer la région
+        private static void BuildCrosshair()
+        {
+            // Canvas en Screen Space Overlay
+            var canvasGO = new GameObject("HUD");
+            var canvas   = canvasGO.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 10;
+            canvasGO.AddComponent<CanvasScaler>();
+            canvasGO.AddComponent<GraphicRaycaster>();
+
+            // Crosshair : deux barres blanches semi-transparentes
+            CreateCrosshairBar(canvasGO.transform, new Vector2(20f, 2f));  // horizontal
+            CreateCrosshairBar(canvasGO.transform, new Vector2(2f, 20f));  // vertical
+        }
+        // ── Cube de sélection 3D ──────────────────────────────
+
+        private static Transform BuildBlockHighlight()
+        {
+            var go  = new GameObject("BlockHighlight");
+            var mf  = go.AddComponent<MeshFilter>();
+            var mr  = go.AddComponent<MeshRenderer>();
+
+            // Mesh : 12 arêtes du cube en MeshTopology.Lines
+            // Le pivot est au coin (0,0,0) ; BlockInteraction positionne
+            // le GO au coin bas-gauche du bloc via FloorToInt.
+            const float e =  1.004f;   // légèrement plus grand qu'1 bloc
+            const float o = -0.002f;   // décalage pour éviter le z-fighting
+
+            var verts = new Vector3[]
+            {
+                new Vector3(o, o, o),   // 0
+                new Vector3(e, o, o),   // 1
+                new Vector3(o, e, o),   // 2
+                new Vector3(e, e, o),   // 3
+                new Vector3(o, o, e),   // 4
+                new Vector3(e, o, e),   // 5
+                new Vector3(o, e, e),   // 6
+                new Vector3(e, e, e),   // 7
+            };
+
+            // 12 arêtes × 2 sommets
+            var indices = new int[]
+            {
+                0,1,  2,3,  4,5,  6,7,   // 4 arêtes en X
+                0,2,  1,3,  4,6,  5,7,   // 4 arêtes en Y
+                0,4,  1,5,  2,6,  3,7,   // 4 arêtes en Z
+            };
+
+            var mesh = new Mesh { name = "BlockHighlightWire" };
+            mesh.vertices = verts;
+            mesh.SetIndices(indices, MeshTopology.Lines, 0);
+            mf.sharedMesh = mesh;
+
+            // Matériau noir unlit — pas de ombre, pas de texture
+            var shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null) shader = Shader.Find("Unlit/Color");
+            var mat = new Material(shader);
+            mat.color = Color.black;
+            mr.sharedMaterial = mat;
+            mr.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows     = false;
+
+            go.SetActive(false);
+            return go.transform;
+        }
+
+        // ── HUD ─────────────────────────────────────────────
+
+        private static void BuildHUD(BlockInteraction blockInteract, Transform playerBody)
+        {
+            // Canvas Screen Space Overlay
+            var canvasGO = new GameObject("HUD");
+            var canvas   = canvasGO.AddComponent<Canvas>();
+            canvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 10;
+            canvasGO.AddComponent<CanvasScaler>();
+            canvasGO.AddComponent<GraphicRaycaster>();
+
+            // Crosshair
+            CreateCrosshairBar(canvasGO.transform, new Vector2(20f, 2f));
+            CreateCrosshairBar(canvasGO.transform, new Vector2(2f, 20f));
+
+            // Hotbar (slots + label)
+            blockInteract.InitHotbar(canvas);
+
+            // Overlay FPS / XYZ / Bloc
+            var hudGO = new GameObject("HudOverlay");
+            hudGO.transform.SetParent(canvasGO.transform, false);
+            var overlay = hudGO.AddComponent<HudOverlay>();
+            overlay.Init(playerBody, blockInteract, canvas);
+        }
+
+        private static Material CreateDefaultMaterial(Color color)
         {
             var mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-            // Couleur grise neutre en attendant l'atlas de textures
-            mat.color = new Color(0.5f, 0.45f, 0.4f);
+            mat.color = color;
             return mat;
         }
     }

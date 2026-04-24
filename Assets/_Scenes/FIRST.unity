@@ -294,7 +294,19 @@ MonoBehaviour:
   playerHeight: 1.8
   playerRadius: 0.4
   spawnAltitude: 10
-  chunkMaterial: {fileID: 2100000, guid: 623badf9d612342169676e79a7982024, type: 2}
+  blockMaterials:
+  - blockType: 1
+    material: {fileID: 2100000, guid: 4710a79a07a4640008aa2a6fb24e68db, type: 2}
+  - blockType: 2
+    material: {fileID: 2100000, guid: 623badf9d612342169676e79a7982024, type: 2}
+  - blockType: 3
+    material: {fileID: 2100000, guid: 5ee6a24c408fa4cb1af44e86618f08db, type: 2}
+  - blockType: 4
+    material: {fileID: 2100000, guid: 9f0652ebbe0214955bd1b32bc55d54a0, type: 2}
+  - blockType: 5
+    material: {fileID: 2100000, guid: e97d627e580214bf390dafc56c29c10c, type: 2}
+  - blockType: 6
+    material: {fileID: 2100000, guid: 478cfab0c2c2e4fe889c780b3f5616b4, type: 2}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

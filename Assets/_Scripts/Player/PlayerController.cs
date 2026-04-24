@@ -25,7 +25,8 @@ namespace AstroVoxel.Player
         [Header("Mouvement")]
         [SerializeField] private float moveSpeed   = 6f;
         [SerializeField] private float jumpForce   = 5f;
-        [SerializeField] private float groundCheckDistance = 0.15f;
+        [SerializeField] private float groundCheckRadius   = 0.35f;
+        [SerializeField] private float groundCheckDistance = 0.25f;
 
         [Header("Références")]
         [Tooltip("Transform de la caméra (pour orienter le mouvement).")]
@@ -36,6 +37,9 @@ namespace AstroVoxel.Player
 
         // ── État ──────────────────────────────────────────────
         private bool _isGrounded;
+        private bool _jumpQueued;           // saut mis en attente
+        private float _coyoteTimer;         // tolérance de saut après bord
+        private const float CoyoteTime = 0.12f;
 
         // ── Cycle de vie ──────────────────────────────────────
 
@@ -48,13 +52,26 @@ namespace AstroVoxel.Player
         {
             CheckGround();
 
-            if (_isGrounded && GetJumpDown())
-                Jump();
+            // Coyote time : fenêtre de saut après avoir quitté un bord
+            if (_isGrounded)
+                _coyoteTimer = CoyoteTime;
+            else
+                _coyoteTimer -= Time.deltaTime;
+
+            if (GetJumpDown() && _coyoteTimer > 0f)
+                _jumpQueued = true;
         }
 
         private void FixedUpdate()
         {
             Move();
+
+            if (_jumpQueued)
+            {
+                _jumpQueued  = false;
+                _coyoteTimer = 0f;   // consomme la fenêtre coyote
+                Jump();
+            }
         }
 
         // ── Déplacement ───────────────────────────────────────
@@ -75,7 +92,8 @@ namespace AstroVoxel.Player
 
             // Projette les directions caméra sur le plan tangentiel
             Vector3 forward = Vector3.ProjectOnPlane(camForward, planetUp).normalized;
-            Vector3 right   = Vector3.Cross(planetUp, forward).normalized * -1f;
+            // Cross(planetUp, forward) = vecteur droit (vérifié : Cross(up,fwd)=right en Unity)
+            Vector3 right   = Vector3.Cross(planetUp, forward).normalized;
 
             Vector3 moveDir = (forward * v + right * h).normalized;
             Vector3 targetVelocity = moveDir * moveSpeed;
@@ -107,14 +125,14 @@ namespace AstroVoxel.Player
 
         private void CheckGround()
         {
-            // Spherecast vers le bas planétaire depuis le centre du joueur
-            Vector3 origin = transform.position;
-            Vector3 down   = -transform.up;
+            // Origine au bas de la capsule (pivot + 0.5 unité vers le haut)
+            Vector3 planetUp = transform.up;
+            Vector3 origin   = transform.position + planetUp * groundCheckRadius;
+            Vector3 down     = -planetUp;
 
-            // Capsule height / 2 approximé à 1 unité
             _isGrounded = UnityEngine.Physics.SphereCast(
-                origin, 0.4f, down,
-                out _, 1f + groundCheckDistance,
+                origin, groundCheckRadius, down,
+                out _, groundCheckRadius + groundCheckDistance,
                 ~LayerMask.GetMask("Player"),
                 QueryTriggerInteraction.Ignore);
         }

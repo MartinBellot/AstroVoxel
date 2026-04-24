@@ -45,8 +45,8 @@ namespace AstroVoxel.VoxelEngine
         [Tooltip("Distance en chunks autour du joueur (recommandé : 3-4).")]
         [SerializeField] private int renderDistanceChunks = 3;
 
-        [Tooltip("Material appliqué à chaque chunk.")]
-        [SerializeField] public Material chunkMaterial;
+        [Tooltip("Matériau appliqué à chaque chunk.")]
+        [SerializeField] public Material[] blockMaterials;   // index = (byte)BlockType
 
         // ── État interne ───────────────────────────────────────
         private readonly Dictionary<ChunkCoord, ChunkRenderer> _chunks
@@ -180,12 +180,14 @@ namespace AstroVoxel.VoxelEngine
             // Pas de rotation — chunks axis-aligned
 
             var mr = go.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = chunkMaterial != null
-                ? chunkMaterial
+            // Le MeshRenderer est configuré par ChunkRenderer.RebuildMesh via blockMaterials.
+            // Un matériau par défaut est requis pour éviter un warning Unity.
+            mr.sharedMaterial = (blockMaterials != null && blockMaterials.Length > 0 && blockMaterials[0] != null)
+                ? blockMaterials[0]
                 : new Material(Shader.Find("Universal Render Pipeline/Lit"));
 
             var cr = go.AddComponent<ChunkRenderer>();
-            cr.InitFromWorld(worldPos, PlanetCenter);
+            cr.InitFromWorld(worldPos, PlanetCenter, blockMaterials);
 
             _chunks[coord] = cr;
         }

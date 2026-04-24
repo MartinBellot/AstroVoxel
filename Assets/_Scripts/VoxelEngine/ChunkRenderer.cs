@@ -22,15 +22,17 @@ namespace AstroVoxel.VoxelEngine
     {
         // ── Références composants ─────────────────────────────
         private MeshFilter   _meshFilter;
+        private MeshRenderer _meshRenderer;
         private MeshCollider _meshCollider;
 
-        // ── Données / View ────────────────────────────────────
+        // ── Données / View ───────────────────────────────────
         private ChunkData _chunkData;
         private MeshData  _meshData;
         private Mesh      _mesh;
 
         // ── Mode monde planétaire ─────────────────────────────
-        private Vector3 _planetCenter;
+        private Vector3    _planetCenter;
+        private Material[] _blockMaterials;   // index = (byte)BlockType
 
         // ── Inspector (mode plat standalone) ─────────────────
         [Header("Génération du terrain (mode standalone)")]
@@ -45,9 +47,11 @@ namespace AstroVoxel.VoxelEngine
         private void Awake()
         {
             _meshFilter   = GetComponent<MeshFilter>();
+            _meshRenderer = GetComponent<MeshRenderer>();
             _meshCollider = GetComponent<MeshCollider>();
 
             _mesh     = new Mesh { name = "ChunkMesh" };
+            _meshData = new MeshData();
             _meshData = new MeshData();
         }
 
@@ -80,14 +84,16 @@ namespace AstroVoxel.VoxelEngine
         /// Initialise ce chunk en mode planétaire (grille 3D axis-aligned).
         /// Appelé par <see cref="PlanetWorld"/> juste après AddComponent.
         /// </summary>
-        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter)
+        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter, Material[] blockMaterials = null)
         {
-            _planetCenter = planetCenter;
+            _planetCenter   = planetCenter;
+            _blockMaterials = blockMaterials;
 
             // Awake peut ne pas encore avoir été appelé si AddComponent vient de se faire
             if (_mesh == null)
             {
                 _meshFilter   = GetComponent<MeshFilter>();
+                _meshRenderer = GetComponent<MeshRenderer>();
                 _meshCollider = GetComponent<MeshCollider>();
                 _mesh     = new Mesh { name = "ChunkMesh" };
                 _meshData = new MeshData();
@@ -132,9 +138,13 @@ namespace AstroVoxel.VoxelEngine
             _meshData.Clear();
             ChunkMeshBuilder.Build(_chunkData, _meshData, transform.position, _planetCenter);
 
+            int subCount = _meshData.Triangles.Length;
+
             _mesh.Clear();
             _mesh.SetVertices(_meshData.Vertices);
-            _mesh.SetTriangles(_meshData.Triangles, 0);
+            _mesh.subMeshCount = subCount;
+            for (int i = 0; i < subCount; i++)
+                _mesh.SetTriangles(_meshData.Triangles[i], i);
             _mesh.SetUVs(0, _meshData.UVs);
             _mesh.RecalculateNormals();
             _mesh.RecalculateBounds();
@@ -142,8 +152,11 @@ namespace AstroVoxel.VoxelEngine
 
             _meshFilter.sharedMesh = _mesh;
 
-            // Force le re-bake du MeshCollider : Unity ne rebake pas si la
-            // référence mesh est inchangée — null puis réassigner force le rebake.
+            // Applique les matériaux par bloc (un par submesh)
+            if (_meshRenderer != null && _blockMaterials != null)
+                _meshRenderer.sharedMaterials = _blockMaterials;
+
+            // Force le re-bake du MeshCollider.
             _meshCollider.sharedMesh = null;
             _meshCollider.sharedMesh = _mesh;
         }

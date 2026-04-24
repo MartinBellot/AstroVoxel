@@ -18,14 +18,26 @@ namespace AstroVoxel.VoxelEngine
     /// </summary>
     public sealed class MeshData
     {
-        public readonly List<Vector3> Vertices  = new List<Vector3>(4096);
-        public readonly List<int>     Triangles = new List<int>(8192);
-        public readonly List<Vector2> UVs       = new List<Vector2>(4096);
+        public readonly List<Vector3> Vertices = new List<Vector3>(4096);
+        /// <summary>
+        /// Un sous-tableau de triangles par type de bloc (index = (byte)BlockType).
+        /// Permet d'avoir un submesh par matériau sans post-traitement.
+        /// </summary>
+        public readonly List<int>[] Triangles;
+        public readonly List<Vector2> UVs = new List<Vector2>(4096);
+
+        public MeshData()
+        {
+            int count = System.Enum.GetValues(typeof(BlockType)).Length;
+            Triangles = new List<int>[count];
+            for (int i = 0; i < count; i++)
+                Triangles[i] = new List<int>(512);
+        }
 
         public void Clear()
         {
             Vertices.Clear();
-            Triangles.Clear();
+            foreach (var t in Triangles) t.Clear();
             UVs.Clear();
         }
 
@@ -118,13 +130,14 @@ namespace AstroVoxel.VoxelEngine
             output.UVs.Add(tileOffset + new Vector2(ts, 0));
             output.UVs.Add(tileOffset + new Vector2(ts, ts));
 
-            // 2 triangles (quad)
-            output.Triangles.Add(vertexBase + 0);
-            output.Triangles.Add(vertexBase + 1);
-            output.Triangles.Add(vertexBase + 2);
-            output.Triangles.Add(vertexBase + 2);
-            output.Triangles.Add(vertexBase + 1);
-            output.Triangles.Add(vertexBase + 3);
+            // 2 triangles (quad) — route vers le submesh du bon type de bloc
+            var tris = output.Triangles[blockId];
+            tris.Add(vertexBase + 0);
+            tris.Add(vertexBase + 1);
+            tris.Add(vertexBase + 2);
+            tris.Add(vertexBase + 2);
+            tris.Add(vertexBase + 1);
+            tris.Add(vertexBase + 3);
         }
 
         // ── Mappage bloc → tuile d'atlas ─────────────────────
