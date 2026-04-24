@@ -13,11 +13,12 @@ namespace AstroVoxel.VoxelEngine
     public static class VoxelData
     {
         // ── Dimensions d'un Chunk ────────────────────────────
-        public const int ChunkWidth  = 16;   // X & Z
-        public const int ChunkHeight = 32;   // Y — hauteur adaptée à l'épaisseur de croûte planétaire
+        public const int ChunkWidth  = 16;   // X
+        public const int ChunkHeight = 16;   // Y — cube uniforme pour grille 3D sphérique
+        public const int ChunkDepth  = 16;   // Z
 
         // Nombre total de blocs dans un Chunk (utilisé pour les tableaux 1D).
-        public const int ChunkVolume = ChunkWidth * ChunkHeight * ChunkWidth;
+        public const int ChunkVolume = ChunkWidth * ChunkHeight * ChunkDepth;
 
         // ── Texture Atlas ────────────────────────────────────
         // Nombre de tuiles par rangée dans l'atlas de textures.
@@ -36,16 +37,18 @@ namespace AstroVoxel.VoxelEngine
             { -1,  0,  0 },   // Left
         };
 
-        // Vertices locaux des 6 faces (sens anti-horaire vu de l'extérieur).
-        // Chaque face : 4 vertices, index dans le tableau de vertices de base.
+        // Vertices locaux des 6 faces (CCW vu de l'extérieur, winding cohérent
+        // avec le pattern de triangulation (0,1,2)+(2,1,3) de AddFace).
+        // Ordre : v0, v0+A, v0+B, v0+A+B  où  A×B = normale sortante.
+        // Vérifié par cross-product pour chaque face.
         public static readonly int[,] VoxelTris = new int[6, 4]
         {
-            { 1, 5, 0, 4 },   // Top
-            { 3, 7, 2, 6 },   // Bottom  (ordre inversé = face vers le bas)
-            { 4, 5, 7, 6 },   // Front
-            { 0, 1, 3, 2 },   // Back
-            { 5, 1, 6, 2 },   // Right
-            { 4, 0, 7, 3 },   // Left
+            { 2, 6, 3, 7 },   // Top    (+Y)  normal=(0,+1,0) ✓
+            { 0, 1, 4, 5 },   // Bottom (-Y)  normal=(0,-1,0) ✓
+            { 4, 5, 6, 7 },   // Front  (+Z)  normal=(0,0,+1) ✓
+            { 0, 2, 1, 3 },   // Back   (-Z)  normal=(0,0,-1) ✓
+            { 1, 3, 5, 7 },   // Right  (+X)  normal=(+1,0,0) ✓
+            { 0, 4, 2, 6 },   // Left   (-X)  normal=(-1,0,0) ✓
         };
 
         // 8 coins d'un cube unité.

@@ -21,7 +21,7 @@ namespace AstroVoxel.Bootstrap
     {
         // ── Inspector ─────────────────────────────────────────
         [Header("Planète")]
-        [SerializeField] private float planetRadius = 110f;
+        [SerializeField] private float planetRadius = 60f;
 
         [Header("Joueur")]
         [SerializeField] private float playerHeight  = 1.8f;
@@ -62,24 +62,6 @@ namespace AstroVoxel.Bootstrap
             world.chunkMaterial        = chunkMaterial != null
                 ? chunkMaterial
                 : CreateDefaultMaterial();
-
-            // Sphère visuelle de référence (wireframe en edit mode)
-#if UNITY_EDITOR
-            var debugSphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            debugSphere.name = "PlanetDebugSphere";
-            debugSphere.transform.SetParent(planetGO.transform);
-            debugSphere.transform.localScale = Vector3.one * planetRadius * 2f;
-            Destroy(debugSphere.GetComponent<Collider>());
-            var mr = debugSphere.GetComponent<MeshRenderer>();
-            var mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-            var c = Color.blue; c.a = 0.1f;
-            mat.color = c;
-            // Transparent mode
-            mat.SetFloat("_Surface", 1);
-            mat.SetFloat("_Blend", 0);
-            mat.renderQueue = 3000;
-            mr.sharedMaterial = mat;
-#endif
         }
 
         // ── Construction du joueur ────────────────────────────

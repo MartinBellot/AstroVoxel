@@ -46,7 +46,11 @@ namespace AstroVoxel.VoxelEngine
         /// Remplit <paramref name="output"/> avec la géométrie visible du Chunk.
         /// Appeler <see cref="MeshData.Clear"/> avant si réutilisation.
         /// </summary>
-        public static void Build(ChunkData data, MeshData output)
+        /// <param name="chunkOrigin">Coin (0,0,0) du chunk en world-space. Nécessaire pour
+        /// le culling inter-chunks : les voisins OOB sont interrogés via le générateur.</param>
+        /// <param name="planetCenter">Centre de la planète. Transmis au générateur pour OOB.</param>
+        public static void Build(ChunkData data, MeshData output,
+                                 Vector3 chunkOrigin, Vector3 planetCenter)
         {
             int width  = data.Width;
             int height = data.Height;
@@ -65,8 +69,22 @@ namespace AstroVoxel.VoxelEngine
                     int ny = y + VoxelData.FaceChecks[face, 1];
                     int nz = z + VoxelData.FaceChecks[face, 2];
 
-                    // La face est visible si le voisin est Air (ou hors limites)
-                    byte neighbour = data.GetBlock(nx, ny, nz); // retourne Air si hors limites
+                    byte neighbour;
+                    if (data.IsInBounds(nx, ny, nz))
+                    {
+                        // Voisin dans le même chunk
+                        neighbour = data.GetBlock(nx, ny, nz);
+                    }
+                    else
+                    {
+                        // Voisin hors chunk : interroge le générateur directement.
+                        // Résultat identique à ce qu'aurait généré le chunk voisin.
+                        // → Culling inter-chunks correct sans coordination runtime.
+                        Vector3 worldPos = chunkOrigin
+                            + new Vector3(nx + 0.5f, ny + 0.5f, nz + 0.5f);
+                        neighbour = PlanetChunkGenerator.GetBlockType(worldPos, planetCenter);
+                    }
+
                     if (BlockProperties.IsSolid(neighbour)) continue;
 
                     AddFace(output, x, y, z, face, blockId);

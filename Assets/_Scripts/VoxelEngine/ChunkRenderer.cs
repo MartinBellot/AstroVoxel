@@ -30,7 +30,7 @@ namespace AstroVoxel.VoxelEngine
         private Mesh      _mesh;
 
         // ── Mode monde planétaire ─────────────────────────────
-        private Vector3 _chunkUp, _chunkRight, _chunkForward, _planetCenter;
+        private Vector3 _planetCenter;
 
         // ── Inspector (mode plat standalone) ─────────────────
         [Header("Génération du terrain (mode standalone)")]
@@ -77,14 +77,11 @@ namespace AstroVoxel.VoxelEngine
         public byte GetBlock(int x, int y, int z) => _chunkData.GetBlock(x, y, z);
 
         /// <summary>
-        /// Initialise ce chunk en mode planétaire et génère immédiatement le mesh.
-        /// Appelé par <see cref="PlanetWorld"/> à la création du chunk.
+        /// Initialise ce chunk en mode planétaire (grille 3D axis-aligned).
+        /// Appelé par <see cref="PlanetWorld"/> juste après AddComponent.
         /// </summary>
-        public void InitFromWorld(Vector3 up, Vector3 right, Vector3 forward, Vector3 planetCenter)
+        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter)
         {
-            _chunkUp      = up;
-            _chunkRight   = right;
-            _chunkForward = forward;
             _planetCenter = planetCenter;
 
             // Awake peut ne pas encore avoir été appelé si AddComponent vient de se faire
@@ -97,13 +94,7 @@ namespace AstroVoxel.VoxelEngine
             }
 
             _chunkData = new ChunkData();
-            PlanetChunkGenerator.Generate(
-                _chunkData,
-                transform.position,
-                _planetCenter,
-                _chunkUp,
-                _chunkRight,
-                _chunkForward);
+            PlanetChunkGenerator.Generate(_chunkData, worldOrigin, _planetCenter);
 
             RebuildMesh();
         }
@@ -139,7 +130,7 @@ namespace AstroVoxel.VoxelEngine
         private void RebuildMesh()
         {
             _meshData.Clear();
-            ChunkMeshBuilder.Build(_chunkData, _meshData);
+            ChunkMeshBuilder.Build(_chunkData, _meshData, transform.position, _planetCenter);
 
             _mesh.Clear();
             _mesh.SetVertices(_meshData.Vertices);
@@ -147,10 +138,13 @@ namespace AstroVoxel.VoxelEngine
             _mesh.SetUVs(0, _meshData.UVs);
             _mesh.RecalculateNormals();
             _mesh.RecalculateBounds();
-            // Optimise le mesh pour la lecture GPU (utile avec le collider).
             _mesh.Optimize();
 
-            _meshFilter.sharedMesh   = _mesh;
+            _meshFilter.sharedMesh = _mesh;
+
+            // Force le re-bake du MeshCollider : Unity ne rebake pas si la
+            // référence mesh est inchangée — null puis réassigner force le rebake.
+            _meshCollider.sharedMesh = null;
             _meshCollider.sharedMesh = _mesh;
         }
 
