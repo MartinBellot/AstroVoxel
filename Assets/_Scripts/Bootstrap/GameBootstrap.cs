@@ -210,50 +210,10 @@ namespace AstroVoxel.Bootstrap
 
         private static Transform BuildBlockHighlight()
         {
-            var go  = new GameObject("BlockHighlight");
-            var mf  = go.AddComponent<MeshFilter>();
-            var mr  = go.AddComponent<MeshRenderer>();
-
-            // Mesh : 12 arêtes du cube en MeshTopology.Lines
-            // Le pivot est au coin (0,0,0) ; BlockInteraction positionne
-            // le GO au coin bas-gauche du bloc via FloorToInt.
-            const float e =  1.004f;   // légèrement plus grand qu'1 bloc
-            const float o = -0.002f;   // décalage pour éviter le z-fighting
-
-            var verts = new Vector3[]
-            {
-                new Vector3(o, o, o),   // 0
-                new Vector3(e, o, o),   // 1
-                new Vector3(o, e, o),   // 2
-                new Vector3(e, e, o),   // 3
-                new Vector3(o, o, e),   // 4
-                new Vector3(e, o, e),   // 5
-                new Vector3(o, e, e),   // 6
-                new Vector3(e, e, e),   // 7
-            };
-
-            // 12 arêtes × 2 sommets
-            var indices = new int[]
-            {
-                0,1,  2,3,  4,5,  6,7,   // 4 arêtes en X
-                0,2,  1,3,  4,6,  5,7,   // 4 arêtes en Y
-                0,4,  1,5,  2,6,  3,7,   // 4 arêtes en Z
-            };
-
-            var mesh = new Mesh { name = "BlockHighlightWire" };
-            mesh.vertices = verts;
-            mesh.SetIndices(indices, MeshTopology.Lines, 0);
-            mf.sharedMesh = mesh;
-
-            // Matériau noir unlit — pas de ombre, pas de texture
-            var shader = Shader.Find("Universal Render Pipeline/Unlit");
-            if (shader == null) shader = Shader.Find("Unlit/Color");
-            var mat = new Material(shader);
-            mat.color = Color.black;
-            mr.sharedMaterial = mat;
-            mr.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
-            mr.receiveShadows     = false;
-
+            var go = new GameObject("BlockHighlight");
+            // BlockWireframe dessine les arêtes via GL (Hidden/Internal-Colored)
+            // → fonctionne avec tous les pipelines, aucun souci de shader pink.
+            go.AddComponent<BlockWireframe>();
             go.SetActive(false);
             return go.transform;
         }

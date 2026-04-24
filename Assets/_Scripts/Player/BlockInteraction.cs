@@ -95,25 +95,34 @@ namespace AstroVoxel.Player
                 ~LayerMask.GetMask("Player"), QueryTriggerInteraction.Ignore);
         }
 
-        // ── Highlight ─────────────────────────────────────────
+        // ── Highlight ───────────────────────────────────────────
+
+        private Vector3? _targetBlockPos;
+
+        /// <summary>Coin (0,0,0) du bloc actuellement visé, ou null si rien.</summary>
+        public Vector3? TargetBlockPos => _targetBlockPos;
 
         private void UpdateHighlight()
         {
-            if (blockHighlight == null) return;
-
             if (Raycast(out RaycastHit hit))
             {
-                // Coin bas-gauche du bloc vis\u00e9 (le wireframe va de (0,0,0) \u00e0 (1,1,1) en local)
                 Vector3 blockCenter = hit.point - hit.normal * 0.5f;
-                blockHighlight.position = new Vector3(
+                _targetBlockPos = new Vector3(
                     Mathf.FloorToInt(blockCenter.x),
                     Mathf.FloorToInt(blockCenter.y),
                     Mathf.FloorToInt(blockCenter.z));
-                blockHighlight.gameObject.SetActive(true);
+
+                if (blockHighlight != null)
+                {
+                    blockHighlight.position = _targetBlockPos.Value;
+                    blockHighlight.gameObject.SetActive(true);
+                }
             }
             else
             {
-                blockHighlight.gameObject.SetActive(false);
+                _targetBlockPos = null;
+                if (blockHighlight != null)
+                    blockHighlight.gameObject.SetActive(false);
             }
         }
 

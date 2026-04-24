@@ -300,7 +300,7 @@ MonoBehaviour:
   - blockType: 2
     material: {fileID: 2100000, guid: 623badf9d612342169676e79a7982024, type: 2}
   - blockType: 3
-    material: {fileID: 2100000, guid: 5ee6a24c408fa4cb1af44e86618f08db, type: 2}
+    material: {fileID: 2100000, guid: 5d8af8f434f69794eabd684fb44b4fbf, type: 2}
   - blockType: 4
     material: {fileID: 2100000, guid: 9f0652ebbe0214955bd1b32bc55d54a0, type: 2}
   - blockType: 5

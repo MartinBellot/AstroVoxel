@@ -77,12 +77,17 @@ namespace AstroVoxel.Player
 
             if (_blockText != null)
             {
-                Vector3? b = _blockInteraction != null
-                    ? _blockInteraction.TargetBlockPos
-                    : null;
-                _blockText.text = b.HasValue
-                    ? $"Bloc: {(int)b.Value.x}  {(int)b.Value.y}  {(int)b.Value.z}"
-                    : "Bloc: —";
+                if (_blockInteraction != null)
+                {
+                    Vector3? b = _blockInteraction.TargetBlockPos;
+                    _blockText.text = b.HasValue
+                        ? $"Bloc: {(int)b.Value.x}  {(int)b.Value.y}  {(int)b.Value.z}"
+                        : "Bloc: \u2014";
+                }
+                else
+                {
+                    _blockText.text = "Bloc: \u2014";
+                }
             }
         }
 
