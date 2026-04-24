@@ -5,6 +5,11 @@
 //    - Une grande sphère avec SunSurface (limb darkening + granulation)
 //    - Une sphère de corona additive (halo Fresnel)
 //    - Une DirectionalLight calée sur la direction solaire
+//
+//  Cycle jour/nuit :
+//    SunDot = dot(dir_soleil, dir_joueur) depuis le centre planète.
+//    +1 = plein midi  |  0 = coucher/lever  |  -1 = minuit.
+//    La lumière s'éteint quand le soleil passe derrière la planète.
 // ============================================================
 
 using UnityEngine;
@@ -13,23 +18,20 @@ using UnityEngine.Rendering;
 namespace AstroVoxel.Environment
 {
     /// <summary>
-    /// Soleil orbital.
-    /// Placez ce composant sur un GameObject vide créé par
-    /// <see cref="Bootstrap.GameBootstrap"/>. La planète doit être
-    /// à l'origine (Vector3.zero) du monde.
+    /// Soleil orbital avec cycle jour/nuit complet.
     /// </summary>
     public sealed class SunOrbit : MonoBehaviour
     {
         // ── Inspector ─────────────────────────────────────────
 
         [Header("Orbite")]
-        [Tooltip("Distance du centre de la planète (unités). Doit être < Camera.farClipPlane.")]
+        [Tooltip("Distance du centre de la planète (unités).")]
         [SerializeField] private float orbitRadius = 800f;
 
-        [Tooltip("Vitesse de rotation orbitale (degrés / seconde).")]
-        [SerializeField] private float orbitSpeed  = 2.5f;
+        [Tooltip("Vitesse de rotation orbitale (degrés / seconde). 0.25 = ~24 min par jour.")]
+        [SerializeField] private float orbitSpeed  = 0.25f;
 
-        [Tooltip("Inclinaison de l'axe d'orbite (comme une inclinaison axiale).")]
+        [Tooltip("Inclinaison de l'axe d'orbite (inclinaison axiale).")]
         [SerializeField, Range(-90f, 90f)] private float orbitTilt = 23.5f;
 
         [Header("Visuel")]
@@ -52,24 +54,52 @@ namespace AstroVoxel.Environment
         [SerializeField, Range(1.5f, 5f)] private float coronaRatio = 2.8f;
 
         [Header("Lumière directionnelle")]
-        [SerializeField] private float lightIntensity  = 1.8f;
-        [SerializeField] private Color lightColor      = new Color(1f, 0.96f, 0.82f);
-        [SerializeField] private float lightIndirect   = 1.0f;
+        [Tooltip("Intensité maximale en plein jour.")]
+        [SerializeField] private float lightIntensity = 1.8f;
+        [Tooltip("Couleur de la lumière à midi (blanc-jaune légèrement chaud).")]
+        [SerializeField] private Color lightColor     = new Color(1.0f, 0.97f, 0.85f, 1f);
+        [SerializeField] private float lightIndirect  = 1.0f;
 
         // ── État interne ──────────────────────────────────────
 
         private Transform _sunBody;
         private Light     _sunLight;
         private float     _angle;
+        private Transform _player;
+
+        // ── Propriétés publiques ──────────────────────────────
+
+        /// <summary>
+        /// Produit scalaire entre la direction planète→soleil et planète→joueur.
+        /// +1 = plein midi  |  0 = coucher  |  -1 = minuit.
+        /// </summary>
+        public float SunDot
+        {
+            get
+            {
+                if (_player == null || _sunBody == null) return 1f;
+                // La planète est toujours à l'origine (Vector3.zero)
+                Vector3 sunDir    = _sunBody.position.normalized;
+                Vector3 playerDir = _player.position.normalized;
+                return Vector3.Dot(sunDir, playerDir);
+            }
+        }
+
+        /// <summary>Direction normalisée du centre planétaire vers le soleil.</summary>
+        public Vector3 SunDirection =>
+            _sunBody != null ? _sunBody.position.normalized : Vector3.right;
+
+        // ── API publique ──────────────────────────────────────
+
+        /// <summary>Injecte le Transform du joueur (appelé depuis GameBootstrap).</summary>
+        public void SetPlayer(Transform player) => _player = player;
 
         // ── Cycle de vie ──────────────────────────────────────
 
         private void Awake()
         {
-            // Inclinaison de l'axe d'orbite (dans le repère parent = monde)
             transform.localRotation = Quaternion.AngleAxis(orbitTilt, Vector3.forward);
 
-            // Pivot mobile qui se déplace sur l'orbite
             var bodyGO = new GameObject("SunBody");
             bodyGO.transform.SetParent(transform, false);
             _sunBody = bodyGO.transform;
@@ -78,7 +108,6 @@ namespace AstroVoxel.Environment
             CreateCorona();
             CreateDirectionalLight();
 
-            // Positionne dès le premier frame
             ApplyOrbit(_angle);
         }
 
@@ -98,10 +127,60 @@ namespace AstroVoxel.Environment
                 0f,
                 Mathf.Sin(rad) * orbitRadius);
 
-            // La lumière directionnelle pointe du soleil vers le centre planétaire (origine)
-            Vector3 toCenter = Vector3.zero - _sunBody.position; // planète à l'origine
+            // Lumière : du soleil vers le centre planétaire (origine)
+            Vector3 toCenter = -_sunBody.position;
             if (toCenter.sqrMagnitude > 0.01f)
                 _sunLight.transform.rotation = Quaternion.LookRotation(toCenter.normalized);
+
+            UpdateDayNightCycle();
+        }
+
+        // ── Cycle jour / nuit ─────────────────────────────────
+
+        /// <summary>
+        /// Ajuste l'intensité et la couleur de la lumière selon l'angle solaire.
+        /// Transitions :
+        ///   SunDot ≥ 0.18 → blanc-jaune (midi)
+        ///   SunDot ≈ 0    → orange brûlant (coucher/lever)
+        ///   SunDot ≈ -0.2 → rouge sombre (crépuscule)
+        ///   SunDot &lt; -0.35 → lumière éteinte (nuit complète)
+        /// </summary>
+        private void UpdateDayNightCycle()
+        {
+            float sd = SunDot;
+
+            // ── Intensité : SmoothStep pour une extinction naturelle ──
+            // Fondu entre -0.12 (sous l'horizon) et +0.22 (juste au-dessus)
+            float t = Mathf.SmoothStep(-0.12f, 0.22f, sd);
+            _sunLight.intensity = Mathf.Lerp(0f, lightIntensity, t);
+
+            // ── Couleur de la lumière ─────────────────────────────────
+            Color midday   = lightColor;                            // blanc-jaune (midi)
+            Color sunset   = new Color(1.0f, 0.42f, 0.04f, 1f);   // orange vif (coucher)
+            Color twilight = new Color(0.28f, 0.09f, 0.01f, 1f);  // rouge sombre (crépuscule)
+
+            Color col;
+            if (sd >= 0.18f)
+            {
+                col = midday;
+            }
+            else if (sd >= 0f)
+            {
+                // Transition midi → coucher : blanc-jaune → orange
+                col = Color.Lerp(sunset, midday, sd / 0.18f);
+            }
+            else if (sd >= -0.20f)
+            {
+                // Coucher → crépuscule : orange → rouge sombre
+                col = Color.Lerp(twilight, sunset, (sd + 0.20f) / 0.20f);
+            }
+            else
+            {
+                // Crépuscule → nuit : fondu vers noir complet
+                col = twilight * Mathf.Clamp01((sd + 0.36f) / 0.16f);
+            }
+
+            _sunLight.color = col;
         }
 
         // ── Construction des objets visuels ───────────────────
@@ -161,8 +240,6 @@ namespace AstroVoxel.Environment
 
         private void CreateDirectionalLight()
         {
-            // La lumière est enfant du root Sun (pas de SunBody) pour
-            // que sa position ne bouge pas mais que sa rotation soit mise à jour.
             var lightGO = new GameObject("SunDirectionalLight");
             lightGO.transform.SetParent(transform, false);
 
@@ -172,8 +249,8 @@ namespace AstroVoxel.Environment
             _sunLight.intensity        = lightIntensity;
             _sunLight.bounceIntensity  = lightIndirect;
             _sunLight.shadows          = LightShadows.Soft;
-            _sunLight.shadowStrength   = 0.85f;
-            _sunLight.shadowResolution = UnityEngine.Rendering.LightShadowResolution.High;
+            _sunLight.shadowStrength   = 0.90f;
+            _sunLight.shadowResolution = LightShadowResolution.High;
         }
 
         // ── Gizmos ────────────────────────────────────────────
@@ -181,11 +258,9 @@ namespace AstroVoxel.Environment
 #if UNITY_EDITOR
         private void OnDrawGizmosSelected()
         {
-            // Orbite
             Gizmos.color = new Color(1f, 0.9f, 0.2f, 0.5f);
             DrawGizmoCircle(transform.position, transform.up, orbitRadius, 64);
 
-            // Soleil (position actuelle)
             if (_sunBody != null)
             {
                 Gizmos.color = new Color(1f, 0.8f, 0f, 0.8f);
@@ -197,12 +272,11 @@ namespace AstroVoxel.Environment
         {
             Vector3 right = Vector3.Cross(normal, Vector3.up).normalized;
             if (right.sqrMagnitude < 0.01f) right = Vector3.right;
-            Vector3 fwd = Vector3.Cross(right, normal).normalized;
-
+            Vector3 fwd  = Vector3.Cross(right, normal).normalized;
             Vector3 prev = center + right * radius;
             for (int s = 1; s <= segments; s++)
             {
-                float a = s * (2f * Mathf.PI / segments);
+                float a    = s * (2f * Mathf.PI / segments);
                 Vector3 next = center + (right * Mathf.Cos(a) + fwd * Mathf.Sin(a)) * radius;
                 Gizmos.DrawLine(prev, next);
                 prev = next;

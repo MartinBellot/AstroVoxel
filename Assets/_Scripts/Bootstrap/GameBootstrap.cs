@@ -54,11 +54,15 @@ namespace AstroVoxel.Bootstrap
             BuildEnvironment();
 
             // ── Soleil orbital ──────────────────────────
-            BuildSun();
+            var sunOrbit = BuildSun();
 
             var builtMaterials = BuildBlockMaterialArray();
             BuildPlanet(out PlanetWorld world, out GravityAttractor attractor, builtMaterials);
             BuildPlayer(world, attractor, builtMaterials, out Transform playerBody, out Camera playerCam);
+
+            // Injecte le joueur dans les systèmes qui en ont besoin
+            sunOrbit.SetPlayer(playerBody);
+            BuildAtmosphere(playerBody);
 
             world.SetViewer(playerBody);
 
@@ -70,10 +74,20 @@ namespace AstroVoxel.Bootstrap
 
         // ── Construction du soleil ──────────────────────────
 
-        private static void BuildSun()
+        private static SunOrbit BuildSun()
         {
             var sunGO = new GameObject("Sun");
-            sunGO.AddComponent<SunOrbit>();
+            return sunGO.AddComponent<SunOrbit>();
+        }
+
+        // ── Construction de l'atmosphère ─────────────────
+
+        private static void BuildAtmosphere(Transform player)
+        {
+            var atmGO = new GameObject("Atmosphere");
+            atmGO.transform.position = Vector3.zero;  // centré sur la planète
+            var atm = atmGO.AddComponent<AtmosphereRenderer>();
+            atm.Init(player);
         }
 
         // ── Construction de l'environnement (skybox) ──────────
@@ -263,18 +277,11 @@ namespace AstroVoxel.Bootstrap
             canvasGO.AddComponent<CanvasScaler>();
             canvasGO.AddComponent<GraphicRaycaster>();
 
-            // Crosshair
-            CreateCrosshairBar(canvasGO.transform, new Vector2(20f, 2f));
-            CreateCrosshairBar(canvasGO.transform, new Vector2(2f, 20f));
-
-            // Hotbar (slots + label) avec les vrais matériaux
-            blockInteract.InitHotbar(canvas, builtMaterials);
-
-            // Overlay FPS / XYZ / Bloc
-            var hudGO = new GameObject("HudOverlay");
-            hudGO.transform.SetParent(canvasGO.transform, false);
-            var overlay = hudGO.AddComponent<HudOverlay>();
-            overlay.Init(playerBody, blockInteract, canvas);
+            // HUD Apple Dark Theme (crosshair + hotbar + info panel)
+            var hudBuilderGO = new GameObject("HudBuilder");
+            hudBuilderGO.transform.SetParent(canvasGO.transform, false);
+            var hud = hudBuilderGO.AddComponent<HudBuilder>();
+            hud.Init(canvas, blockInteract, playerBody, builtMaterials);
         }
 
         private static Material CreateDefaultMaterial(Color color)
