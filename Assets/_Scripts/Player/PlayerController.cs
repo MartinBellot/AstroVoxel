@@ -23,8 +23,9 @@ namespace AstroVoxel.Player
     {
         // ── Inspector ─────────────────────────────────────────
         [Header("Mouvement")]
-        [SerializeField] private float moveSpeed   = 6f;
-        [SerializeField] private float jumpForce   = 5f;
+        [SerializeField] private float moveSpeed    = 6f;
+        [SerializeField] private float sprintSpeed  = 12f;
+        [SerializeField] private float jumpForce    = 5f;
         [SerializeField] private float groundCheckRadius   = 0.35f;
         [SerializeField] private float groundCheckDistance = 0.25f;
 
@@ -36,9 +37,10 @@ namespace AstroVoxel.Player
         private Rigidbody _rb;
 
         // ── État ──────────────────────────────────────────────
-        private bool _isGrounded;
-        private bool _jumpQueued;           // saut mis en attente
-        private float _coyoteTimer;         // tolérance de saut après bord
+        private bool  _isGrounded;
+        private bool  _jumpQueued;           // saut mis en attente
+        private bool  _isSprinting;
+        private float _coyoteTimer;          // tolérance de saut après bord
         private const float CoyoteTime = 0.12f;
 
         // ── Cycle de vie ──────────────────────────────────────
@@ -51,6 +53,7 @@ namespace AstroVoxel.Player
         private void Update()
         {
             CheckGround();
+            _isSprinting = GetSprint();
 
             // Coyote time : fenêtre de saut après avoir quitté un bord
             if (_isGrounded)
@@ -96,7 +99,8 @@ namespace AstroVoxel.Player
             Vector3 right   = Vector3.Cross(planetUp, forward).normalized;
 
             Vector3 moveDir = (forward * v + right * h).normalized;
-            Vector3 targetVelocity = moveDir * moveSpeed;
+            float   speed   = _isSprinting ? sprintSpeed : moveSpeed;
+            Vector3 targetVelocity = moveDir * speed;
 
             // Préserve la composante radiale (gravité)
             Vector3 radialVelocity = Vector3.Project(_rb.linearVelocity, planetUp);
@@ -105,7 +109,7 @@ namespace AstroVoxel.Player
             // Applique la vitesse par impulsion (compatible avec ForceMode.Acceleration de la gravité)
             Vector3 velocityChange = desiredVelocity - _rb.linearVelocity;
             // Clamp pour ne pas contrecarrer brutalement la gravité radiale
-            velocityChange = Vector3.ClampMagnitude(velocityChange, moveSpeed);
+            velocityChange = Vector3.ClampMagnitude(velocityChange, speed);
 
             _rb.AddForce(velocityChange, ForceMode.VelocityChange);
         }
@@ -169,6 +173,16 @@ namespace AstroVoxel.Player
             return fwd - bwd;
 #else
             return Input.GetAxisRaw("Vertical");
+#endif
+        }
+
+        private static bool GetSprint()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+            return kb != null && kb.leftShiftKey.isPressed;
+#else
+            return Input.GetKey(KeyCode.LeftShift);
 #endif
         }
 
