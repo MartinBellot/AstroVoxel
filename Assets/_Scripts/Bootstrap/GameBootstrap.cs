@@ -53,6 +53,9 @@ namespace AstroVoxel.Bootstrap
             // ── Skybox spatiale ───────────────────────────────
             BuildEnvironment();
 
+            // ── Soleil orbital ──────────────────────────
+            BuildSun();
+
             var builtMaterials = BuildBlockMaterialArray();
             BuildPlanet(out PlanetWorld world, out GravityAttractor attractor, builtMaterials);
             BuildPlayer(world, attractor, builtMaterials, out Transform playerBody, out Camera playerCam);
@@ -63,6 +66,14 @@ namespace AstroVoxel.Bootstrap
             // le premier FixedUpdate, sinon le joueur traverse la planète.
             world.UpdateChunks();
             UnityEngine.Physics.SyncTransforms();
+        }
+
+        // ── Construction du soleil ──────────────────────────
+
+        private static void BuildSun()
+        {
+            var sunGO = new GameObject("Sun");
+            sunGO.AddComponent<SunOrbit>();
         }
 
         // ── Construction de l'environnement (skybox) ──────────
@@ -164,8 +175,14 @@ namespace AstroVoxel.Bootstrap
 
             playerCam = cameraGO.AddComponent<Camera>();
             playerCam.nearClipPlane = 0.1f;
-            playerCam.farClipPlane  = 1000f;
+            playerCam.farClipPlane  = 2000f;  // doit couvrir l'orbite solaire (800u + corona)
             playerCam.fieldOfView   = 70f;
+
+            // Active la post-processing URP (requis pour que Bloom/autres effets s'appliquent)
+            var urpData = cameraGO.GetComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+            if (urpData == null)
+                urpData = cameraGO.AddComponent<UnityEngine.Rendering.Universal.UniversalAdditionalCameraData>();
+            urpData.renderPostProcessing = true;
 
             // AudioListener sur la caméra
             cameraGO.AddComponent<AudioListener>();
