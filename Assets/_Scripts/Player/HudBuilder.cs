@@ -249,13 +249,6 @@ namespace AstroVoxel.Player
             hotbarBg.color = _bgDeep;
             MakeRounded(hotbarBg, radius);
 
-            // Bordure externe subtile
-            var rimGO = CreateRect("Rim", hotbarRoot, Vector2.zero, new Vector2(totalW, totalH), _border);
-            MakeRounded(rimGO, radius);
-            rimGO.GetComponent<RectTransform>().anchorMin = new Vector2(0.5f, 0.5f);
-            rimGO.GetComponent<RectTransform>().anchorMax = new Vector2(0.5f, 0.5f);
-            rimGO.GetComponent<Image>().fillCenter = false;
-
             _slotBg   = new Image[count];
             _slotRim  = new Image[count];
             _slotIcon = new RawImage[count];
@@ -374,13 +367,6 @@ namespace AstroVoxel.Player
             panelBg.color = _bgDeep;
             MakeRounded(panelBg, radius);
 
-            // Bordure
-            var rimImg = CreateRect("PanelRim", panel, Vector2.zero, new Vector2(w, h), _border);
-            rimImg.GetComponent<Image>().fillCenter = false;
-            MakeRounded(rimImg.GetComponent<Image>(), radius);
-            var rimRT = rimImg.GetComponent<RectTransform>();
-            rimRT.anchorMin = new Vector2(0.5f, 0.5f);
-            rimRT.anchorMax = new Vector2(0.5f, 0.5f);
 
             const float rowH    = 24f;
             const float padX    = 14f;

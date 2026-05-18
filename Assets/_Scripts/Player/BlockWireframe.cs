@@ -37,21 +37,24 @@ namespace AstroVoxel.Player
 
             GetMat().SetPass(0);
 
-            Vector3 p = transform.position;
-            float   o = Offset;
-            float   s = Size;
+            Vector3    p = transform.position;
+            Quaternion r = transform.rotation;   // suit l'orientation du chunk (face planète)
+            float      o = Offset;
+            float      s = Size;
 
-            // 8 coins du cube
+            // 8 coins du cube — offsets exprimés dans l'espace LOCAL du bloc,
+            // puis tournés via la rotation du transform pour s'aligner avec
+            // la face de la planète sur laquelle se trouve le chunk.
             var v = new Vector3[8]
             {
-                p + new Vector3(o, o, o),   // 0
-                p + new Vector3(s, o, o),   // 1
-                p + new Vector3(o, s, o),   // 2
-                p + new Vector3(s, s, o),   // 3
-                p + new Vector3(o, o, s),   // 4
-                p + new Vector3(s, o, s),   // 5
-                p + new Vector3(o, s, s),   // 6
-                p + new Vector3(s, s, s),   // 7
+                p + r * new Vector3(o, o, o),   // 0
+                p + r * new Vector3(s, o, o),   // 1
+                p + r * new Vector3(o, s, o),   // 2
+                p + r * new Vector3(s, s, o),   // 3
+                p + r * new Vector3(o, o, s),   // 4
+                p + r * new Vector3(s, o, s),   // 5
+                p + r * new Vector3(o, s, s),   // 6
+                p + r * new Vector3(s, s, s),   // 7
             };
 
             GL.PushMatrix();

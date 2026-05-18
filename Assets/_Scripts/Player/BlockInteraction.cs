@@ -41,8 +41,6 @@ namespace AstroVoxel.Player
 
         private void Update()
         {
-            UpdateHighlight();
-
             if (GetMouseDown(0))   // Clic gauche
                 TryBreakBlock();
 
@@ -51,9 +49,14 @@ namespace AstroVoxel.Player
 
             // Scroll ou touches pour changer le bloc actif
             HandleBlockSelection();
-
-
         }
+
+        // Le highlight est mis à jour en LateUpdate, APRÈS que le
+        // character controller planétaire a appliqué sa rotation
+        // gravitationnelle. Sans ça, la rotation du joueur/caméra
+        // (parent du highlight) écrase la world-rotation qu'on vient
+        // de poser dans Update, causant un décalage total dès qu'on bouge.
+        private void LateUpdate() => UpdateHighlight();
 
         // ── Actions ───────────────────────────────────────────
 
@@ -98,23 +101,38 @@ namespace AstroVoxel.Player
             {
                 Vector3 blockCenter = hit.point - hit.normal * 0.5f;
 
-                // Positionne le highlight en espace local du chunk (tient compte
-                // de la rotation du chunk pour les faces diagonales 18-faces).
-                ChunkRenderer cr = world != null ? world.GetChunkAt(blockCenter) : null;
+                // Priorité : chunk directement touché par le raycast (évite
+                // l'ambiguïté GetFace aux coutures kSeamMargin).
+                // Fallback : GetChunkAt si le collider n'est pas un chunk
+                // (autre objet de la scène, terrain, etc.).
+                ChunkRenderer cr = hit.collider != null
+                    ? hit.collider.GetComponent<ChunkRenderer>()
+                    : null;
+                if (cr == null && world != null)
+                    cr = world.GetChunkAt(hit.point - hit.normal * 0.5f);
+
                 if (cr != null)
                 {
-                    Vector3Int lb = world.WorldToLocalBlock(blockCenter);
-                    _targetBlockPos = cr.transform.TransformPoint(lb.x, lb.y, lb.z);
+                    // Convertit le point hit en espace LOCAL du chunk (gère
+                    // rotation + échelle + hiérarchie de transforms).
+                    Vector3 local = cr.transform.InverseTransformPoint(blockCenter);
+                    int lx = Mathf.Clamp(Mathf.FloorToInt(local.x), 0, VoxelData.ChunkWidth  - 1);
+                    int ly = Mathf.Clamp(Mathf.FloorToInt(local.y), 0, VoxelData.ChunkHeight - 1);
+                    int lz = Mathf.Clamp(Mathf.FloorToInt(local.z), 0, VoxelData.ChunkDepth  - 1);
+
+                    // Coin du bloc en world-space (le pivot du highlight est au coin).
+                    Vector3 corner = cr.transform.TransformPoint(lx, ly, lz);
+                    _targetBlockPos = corner;
                     if (blockHighlight != null)
                     {
-                        blockHighlight.position = _targetBlockPos.Value;
+                        blockHighlight.position = corner;
                         blockHighlight.rotation = cr.transform.rotation;
                         blockHighlight.gameObject.SetActive(true);
                     }
                 }
                 else
                 {
-                    // Repli si chunk non chargé
+                    // Repli si le collider n'est pas un chunk (ne devrait pas arriver)
                     _targetBlockPos = new Vector3(
                         Mathf.FloorToInt(blockCenter.x),
                         Mathf.FloorToInt(blockCenter.y),

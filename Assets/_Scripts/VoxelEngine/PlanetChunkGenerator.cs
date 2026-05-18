@@ -83,7 +83,9 @@ namespace AstroVoxel.VoxelEngine
             // Les grottes s'appliquent à TOUS les blocs solides (y compris surface)
             // pour que les tunnels débouchent naturellement en surface.
             float depth = surfaceRadius - dist;   // > 0 sous la surface
-            bool cave = IsCave(worldPos, depth);
+            // Les grottes ne percent pas au-delà de la croûte : on les coupe
+            // dès que depth > CrustThickness + quelques blocs de marge.
+            bool cave = (depth <= CrustThickness + 3f) && IsCave(worldPos, depth);
 
             if (dist > surfaceRadius + 0.5f) return (byte)BlockType.Air;
             if (dist > surfaceRadius - 0.5f) return cave ? (byte)BlockType.Air : (byte)BlockType.Grass;
