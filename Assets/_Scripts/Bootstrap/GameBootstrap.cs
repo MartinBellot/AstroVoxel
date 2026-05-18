@@ -5,7 +5,6 @@
 //  C'est le seul MonoBehaviour à placer manuellement.
 // ============================================================
 
-using System;
 using UnityEngine;
 using UnityEngine.UI;
 using AstroVoxel.VoxelEngine;
@@ -16,17 +15,6 @@ using AstroVoxel.Vehicle;
 
 namespace AstroVoxel.Bootstrap
 {
-    /// <summary>
-    /// Association d'un type de bloc à son matériau Unity.
-    /// Renseigner dans l'Inspector du Bootstrap.
-    /// </summary>
-    [Serializable]
-    public struct BlockMaterialEntry
-    {
-        public BlockType blockType;
-        public Material  material;
-    }
-
     /// <summary>
     /// Point d'entrée de la scène.
     /// Construit la hiérarchie complète : Planète → Joueur → Caméra.
@@ -43,10 +31,6 @@ namespace AstroVoxel.Bootstrap
         [SerializeField] private float playerRadius  = 0.4f;
         [SerializeField] private float spawnAltitude = 10f;   // blocs au-dessus de la surface
 
-        [Header("Matériaux par bloc")]
-        [Tooltip("Un entrée par type de bloc. Les types non renseignés reçoivent un matériau gris par défaut.")]
-        [SerializeField] private BlockMaterialEntry[] blockMaterials;
-
         // ── Cycle de vie ──────────────────────────────────────
 
         private void Awake()
@@ -57,7 +41,7 @@ namespace AstroVoxel.Bootstrap
             // ── Soleil orbital ──────────────────────────
             var sunOrbit = BuildSun();
 
-            var builtMaterials = BuildBlockMaterialArray();
+            var builtMaterials = LoadBlockMaterials();
             BuildPlanet(out PlanetWorld world, out GravityAttractor attractor, builtMaterials);
             BuildPlayer(world, attractor, builtMaterials, out Transform playerBody, out Camera playerCam);
 
@@ -121,24 +105,22 @@ namespace AstroVoxel.Bootstrap
         }
 
         /// <summary>
-        /// Assemble un tableau Material[] indexé par (byte)BlockType.
-        /// Les types non renseignés reçoivent un matériau gris par défaut.
+        /// Charge les matériaux de blocs depuis la BlockTextureRegistry (Assets/Resources/).
+        /// Repli sur des matériaux gris si la registry n'est pas encore construite
+        /// (lancer AstroVoxel → Rebuild Block Texture Registry dans l'éditeur).
         /// </summary>
-        private Material[] BuildBlockMaterialArray()
+        private static Material[] LoadBlockMaterials()
         {
-            int count = Enum.GetValues(typeof(BlockType)).Length;
-            var mats  = new Material[count];
+            var registry = UnityEngine.Resources.Load<AstroVoxel.VoxelEngine.BlockTextureRegistry>("BlockTextureRegistry");
+            if (registry != null && registry.materials != null && registry.materials.Length == 256)
+                return registry.materials;
 
-            // Remplit tout avec un matériau gris par défaut
-            for (int i = 0; i < count; i++)
+            // Repli : 256 matériaux gris
+            Debug.LogWarning("[GameBootstrap] BlockTextureRegistry introuvable. " +
+                             "Lancez AstroVoxel → Rebuild Block Texture Registry dans l'éditeur Unity.");
+            var mats = new Material[256];
+            for (int i = 0; i < 256; i++)
                 mats[i] = CreateDefaultMaterial(new Color(0.5f, 0.45f, 0.4f));
-
-            // Surcharge avec les matériaux assignés dans l'Inspector
-            if (blockMaterials != null)
-                foreach (var entry in blockMaterials)
-                    if (entry.material != null)
-                        mats[(int)entry.blockType] = entry.material;
-
             return mats;
         }
 
@@ -289,6 +271,12 @@ namespace AstroVoxel.Bootstrap
             hudBuilderGO.transform.SetParent(canvasGO.transform, false);
             var hud = hudBuilderGO.AddComponent<HudBuilder>();
             hud.Init(canvas, blockInteract, playerBody, builtMaterials);
+
+            // Inventaire créatif (touche E)
+            var invGO = new GameObject("CreativeInventory");
+            invGO.transform.SetParent(canvasGO.transform, false);
+            var inv = invGO.AddComponent<CreativeInventory>();
+            inv.Init(canvas, blockInteract, builtMaterials);
         }
 
         // ── Construction du vaisseau spatial ─────────────────

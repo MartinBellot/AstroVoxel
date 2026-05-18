@@ -6,6 +6,7 @@
 // ============================================================
 
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace AstroVoxel.VoxelEngine
@@ -30,6 +31,12 @@ namespace AstroVoxel.VoxelEngine
         private ChunkData _chunkData;
         private MeshData  _meshData;
         private Mesh      _mesh;
+
+        // Liste des renderingIds actifs (réutilisée pour éviter les allocations)
+        private readonly List<int> _activeRids = new List<int>(32);
+
+        // Matériau de repli (gris neutre) si le registry n'est pas encore construit
+        private static Material _fallbackMat;
 
         // ── Mode monde planétaire ─────────────────────────────
         private Vector3    _planetCenter;
@@ -56,7 +63,12 @@ namespace AstroVoxel.VoxelEngine
 
             _mesh     = new Mesh { name = "ChunkMesh" };
             _meshData = new MeshData();
-            _meshData = new MeshData();
+
+            if (_fallbackMat == null)
+            {
+                _fallbackMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Diffuse"));
+                _fallbackMat.color = new Color(0.5f, 0.45f, 0.4f);
+            }
         }
 
         private void Start()
@@ -104,6 +116,11 @@ namespace AstroVoxel.VoxelEngine
                 _meshCollider = GetComponent<MeshCollider>();
                 _mesh     = new Mesh { name = "ChunkMesh" };
                 _meshData = new MeshData();
+                if (_fallbackMat == null)
+                {
+                    _fallbackMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Diffuse"));
+                    _fallbackMat.color = new Color(0.5f, 0.45f, 0.4f);
+                }
             }
 
             _chunkData = new ChunkData();
@@ -173,13 +190,19 @@ namespace AstroVoxel.VoxelEngine
             _meshData.Clear();
             ChunkMeshBuilder.Build(_chunkData, _meshData, GetNeighbourForMesh);
 
-            int subCount = _meshData.Triangles.Length;
+            // ── Collecte des sous-meshes non vides ───────────────
+            // Seuls les renderingIds ayant des triangles deviennent des submeshes Unity.
+            // Évite d'avoir 256 submeshes vides qui pèsent inutilement sur le GPU.
+            _activeRids.Clear();
+            for (int i = 0; i < _meshData.Triangles.Length; i++)
+                if (_meshData.Triangles[i].Count > 0)
+                    _activeRids.Add(i);
 
             _mesh.Clear();
             _mesh.SetVertices(_meshData.Vertices);
-            _mesh.subMeshCount = subCount;
-            for (int i = 0; i < subCount; i++)
-                _mesh.SetTriangles(_meshData.Triangles[i], i);
+            _mesh.subMeshCount = _activeRids.Count;
+            for (int s = 0; s < _activeRids.Count; s++)
+                _mesh.SetTriangles(_meshData.Triangles[_activeRids[s]], s);
             _mesh.SetUVs(0, _meshData.UVs);
             _mesh.RecalculateNormals();
             _mesh.RecalculateBounds();
@@ -187,9 +210,19 @@ namespace AstroVoxel.VoxelEngine
 
             _meshFilter.sharedMesh = _mesh;
 
-            // Applique les matériaux par bloc (un par submesh)
-            if (_meshRenderer != null && _blockMaterials != null)
-                _meshRenderer.sharedMaterials = _blockMaterials;
+            // ── Applique les matériaux (un par submesh actif) ────
+            if (_meshRenderer != null)
+            {
+                var mats = new Material[_activeRids.Count];
+                for (int s = 0; s < _activeRids.Count; s++)
+                {
+                    int rid = _activeRids[s];
+                    mats[s] = (_blockMaterials != null && rid < _blockMaterials.Length && _blockMaterials[rid] != null)
+                        ? _blockMaterials[rid]
+                        : _fallbackMat;
+                }
+                _meshRenderer.sharedMaterials = mats;
+            }
 
             // Force le re-bake du MeshCollider.
             _meshCollider.sharedMesh = null;

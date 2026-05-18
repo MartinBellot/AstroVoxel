@@ -60,6 +60,8 @@ namespace AstroVoxel.Player
 
         private void Update()
         {
+            if (CreativeInventory.IsOpen) return;
+
             CheckGround();
             _isSprinting = GetSprint();
 
@@ -79,6 +81,8 @@ namespace AstroVoxel.Player
 
         private void FixedUpdate()
         {
+            if (CreativeInventory.IsOpen) return;
+
             Move();
 
             if (_jumpQueued)

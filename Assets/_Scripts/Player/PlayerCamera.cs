@@ -33,6 +33,8 @@ namespace AstroVoxel.Player
 
         private void Update()
         {
+            if (CreativeInventory.IsOpen) return;
+
             if (!IsCursorLocked() && GetAnyMouseButtonDown())
                 LockCursor(true);
 

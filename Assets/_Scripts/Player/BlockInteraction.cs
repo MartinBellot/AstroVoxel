@@ -41,6 +41,9 @@ namespace AstroVoxel.Player
 
         private void Update()
         {
+            // Bloque toute interaction quand l'inventaire est ouvert
+            if (CreativeInventory.IsOpen) return;
+
             if (GetMouseDown(0))   // Clic gauche
                 TryBreakBlock();
 
@@ -154,12 +157,14 @@ namespace AstroVoxel.Player
 
         // ── Sélection du bloc ─────────────────────────────────
 
-        private static readonly BlockType[] _palette = new BlockType[]
+        private static readonly BlockType[] _defaultHotbar = new BlockType[9]
         {
             BlockType.Stone, BlockType.Dirt, BlockType.Grass,
-            BlockType.Sand,  BlockType.Wood, BlockType.Leaves,
+            BlockType.Sand, BlockType.Wood, BlockType.Leaves,
+            BlockType.Cobblestone, BlockType.StoneBricks, BlockType.Bricks,
         };
-        private int _paletteIndex;
+        private BlockType[] _hotbar = (BlockType[])_defaultHotbar.Clone();
+        private int _hotbarIndex;
 
         private void HandleBlockSelection()
         {
@@ -168,24 +173,24 @@ namespace AstroVoxel.Player
             if (mouse != null)
             {
                 float scroll = mouse.scroll.y.ReadValue();
-                if (scroll > 0f)  _paletteIndex = (_paletteIndex + 1) % _palette.Length;
-                if (scroll < 0f)  _paletteIndex = (_paletteIndex - 1 + _palette.Length) % _palette.Length;
+                if (scroll > 0f)  _hotbarIndex = (_hotbarIndex + 1) % _hotbar.Length;
+                if (scroll < 0f)  _hotbarIndex = (_hotbarIndex - 1 + _hotbar.Length) % _hotbar.Length;
             }
             var kb = Keyboard.current;
             if (kb != null)
-                for (int i = 0; i < _palette.Length; i++)
+                for (int i = 0; i < _hotbar.Length; i++)
                     if (kb[(Key)(Key.Digit1 + i)].wasPressedThisFrame)
-                        _paletteIndex = i;
+                        _hotbarIndex = i;
 #else
             float scroll = Input.GetAxisRaw("Mouse ScrollWheel");
-            if (scroll > 0f)  _paletteIndex = (_paletteIndex + 1) % _palette.Length;
-            if (scroll < 0f)  _paletteIndex = (_paletteIndex - 1 + _palette.Length) % _palette.Length;
+            if (scroll > 0f)  _hotbarIndex = (_hotbarIndex + 1) % _hotbar.Length;
+            if (scroll < 0f)  _hotbarIndex = (_hotbarIndex - 1 + _hotbar.Length) % _hotbar.Length;
 
-            for (int i = 0; i < _palette.Length; i++)
+            for (int i = 0; i < _hotbar.Length; i++)
                 if (Input.GetKeyDown(KeyCode.Alpha1 + i))
-                    _paletteIndex = i;
+                    _hotbarIndex = i;
 #endif
-            blockToPlace = _palette[_paletteIndex];
+            blockToPlace = _hotbar[_hotbarIndex];
         }
 
         private static bool GetMouseDown(int button)
@@ -203,9 +208,18 @@ namespace AstroVoxel.Player
 
         // ── Accesseurs ────────────────────────────────────────
 
-        public BlockType ActiveBlock   => blockToPlace;
-        public int       PaletteIndex    => _paletteIndex;
-        public static BlockType[] Palette => _palette;
+        public BlockType   ActiveBlock  => blockToPlace;
+        public int         HotbarIndex  => _hotbarIndex;
+        public BlockType[] Hotbar       => _hotbar;
+
+        /// <summary>
+        /// Permet à l'inventaire créatif de remplacer un bloc dans la hotbar.
+        /// </summary>
+        public void SetHotbarSlot(int slot, BlockType t)
+        {
+            if (slot >= 0 && slot < _hotbar.Length)
+                _hotbar[slot] = t;
+        }
 
         /// <summary>Assigne les références depuis GameBootstrap.</summary>
         public void Init(Camera cam, PlanetWorld w)

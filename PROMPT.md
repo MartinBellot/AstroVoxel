@@ -1,1 +1,0 @@
-J'ai ajouté toutes les textures (issues de mon resource pack minecraft) dans textures/ (*.png)

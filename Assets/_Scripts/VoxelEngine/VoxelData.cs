@@ -76,8 +76,9 @@ namespace AstroVoxel.VoxelEngine
 
     // ============================================================
     //  BlockType
-    //  Définit tous les types de blocs du jeu.
-    //  Le byte ID doit correspondre à l'index dans la liste.
+    //  Identifiants de blocs sur 8 bits (max 255 types).
+    //  0-91   : blocs stockés dans les chunks (données monde).
+    //  200-216: IDs de rendu internes (face-variants, jamais stockés).
     // ============================================================
 
     /// <summary>
@@ -85,38 +86,159 @@ namespace AstroVoxel.VoxelEngine
     /// </summary>
     public enum BlockType : byte
     {
+        // ── Blocs de base ─────────────────────────────────────
         Air   = 0,
         Stone = 1,
         Dirt  = 2,
         Grass = 3,
         Sand  = 4,
-        Wood  = 5,
-        Leaves = 6,
+        Wood  = 5,   // OakLog (compatibilité ascendante)
+        Leaves = 6,  // OakLeaves
+
+        // ── Pierre et variantes ───────────────────────────────
+        Cobblestone        = 7,
+        MossyCobblestone   = 8,
+        Andesite           = 9,
+        PolishedAndesite   = 10,
+        Diorite            = 11,
+        PolishedDiorite    = 12,
+        Granite            = 13,
+        PolishedGranite    = 14,
+        StoneBricks        = 15,
+        CrackedStoneBricks = 16,
+        MossyStoneBricks   = 17,
+        ChiseledStoneBricks= 18,
+        SmoothStone        = 19,
+
+        // ── Terre et sol ──────────────────────────────────────
+        Gravel    = 20,
+        Clay      = 21,
+        CoarseDirt= 22,
+        Podzol    = 23,   // multi-face
+        Mud       = 24,
+        MudBricks = 25,
+
+        // ── Sable et grès ─────────────────────────────────────
+        RedSand       = 26,
+        Sandstone     = 27,   // multi-face
+        RedSandstone  = 28,   // multi-face
+
+        // ── Blocs de bois – planches ──────────────────────────
+        OakPlanks    = 29,
+        SprucePlanks = 30,
+        BirchPlanks  = 31,
+        JunglePlanks = 32,
+        AcaciaPlanks = 33,
+        DarkOakPlanks= 34,
+        MangrovePlanks=35,
+        CherryPlanks = 36,
+        CrimsonPlanks= 37,
+        WarpedPlanks = 38,
+        BambooPlanks = 39,
+
+        // ── Blocs de bois – troncs ────────────────────────────
+        // Wood=5 = OakLog (conservé)
+        SpruceLog  = 40,
+        BirchLog   = 41,
+        JungleLog  = 42,
+        AcaciaLog  = 43,
+        DarkOakLog = 44,
+        MangroveLog= 45,
+        CherryLog  = 46,
+
+        // ── Feuillages ────────────────────────────────────────
+        // Leaves=6 = OakLeaves (conservé)
+        SpruceLeaves  = 47,
+        BirchLeaves   = 48,
+        JungleLeaves  = 49,
+        AcaciaLeaves  = 50,
+        DarkOakLeaves = 51,
+        MangroveLeaves= 52,
+        CherryLeaves  = 53,
+
+        // ── Blocs spéciaux (overworld) ────────────────────────
+        Bedrock   = 54,
+        Obsidian  = 55,
+        Bricks    = 56,
+        Ice       = 57,
+        PackedIce = 58,
+        BlueIce   = 59,
+
+        // ── Nether ────────────────────────────────────────────
+        NetherBricks   = 60,
+        RedNetherBricks= 61,
+        Netherrack     = 62,
+        SoulSand       = 63,
+        SoulSoil       = 64,
+        Glowstone      = 65,
+
+        // ── End ───────────────────────────────────────────────
+        EndStone    = 66,
+        Blackstone  = 67,
+        PurpurBlock = 68,
+        QuartzBricks= 69,
+
+        // ── Deepslate ─────────────────────────────────────────
+        Deepslate       = 70,   // multi-face
+        CobbledDeepslate= 71,
+        DeepSlateBricks = 72,
+        DeepSlateTiles  = 73,
+
+        // ── Minerais ──────────────────────────────────────────
+        CoalOre    = 74,
+        IronOre    = 75,
+        CopperOre  = 76,
+        GoldOre    = 77,
+        LapisOre   = 78,
+        RedstoneOre= 79,
+        DiamondOre = 80,
+        EmeraldOre = 81,
+
+        // ── Blocs de minerais ─────────────────────────────────
+        CoalBlock    = 82,
+        IronBlock    = 83,
+        GoldBlock    = 84,
+        DiamondBlock = 85,
+        EmeraldBlock = 86,
+        LapisBlock   = 87,
+        RedstoneBlock= 88,
+        NetheriteBlock=89,
+        CopperBlock  = 90,
+        AmethystBlock= 91,
+
+        // ── IDs de rendu internes (face-variants) ─────────────
+        // Ces valeurs ne sont JAMAIS stockées dans les chunks.
+        // Elles servent uniquement d'index de sous-mesh dans MeshData.
+        GrassSide         = 200,
+        GrassBottom       = 201,
+        OakLogTop         = 202,
+        SpruceLogTop      = 203,
+        BirchLogTop       = 204,
+        JungleLogTop      = 205,
+        AcaciaLogTop      = 206,
+        DarkOakLogTop     = 207,
+        MangroveLogTop    = 208,
+        CherryLogTop      = 209,
+        SandstoneTop      = 210,
+        SandstoneBottom   = 211,
+        RedSandstoneTop   = 212,
+        RedSandstoneBottom= 213,
+        DeepslateTop      = 214,
+        PodzolTop         = 215,
+        PodzolBottom      = 216,
     }
 
     /// <summary>
     /// Propriétés statiques associées à chaque type de bloc.
-    /// Évite les branchements en remplaçant les switch par un tableau.
     /// </summary>
     public static class BlockProperties
     {
-        private static readonly bool[] _isSolid = new bool[]
-        {
-            false, // Air
-            true,  // Stone
-            true,  // Dirt
-            true,  // Grass
-            true,  // Sand
-            true,  // Wood
-            true,  // Leaves
-        };
+        // Plage des IDs de blocs solides réels (stockés dans les chunks).
+        private const byte SolidMin = 1;
+        private const byte SolidMax = 91;
 
         /// <summary>Retourne true si le bloc doit bloquer la génération des faces adjacentes.</summary>
-        public static bool IsSolid(byte blockId)
-        {
-            if (blockId >= _isSolid.Length) return false;
-            return _isSolid[blockId];
-        }
+        public static bool IsSolid(byte blockId) => blockId >= SolidMin && blockId <= SolidMax;
 
         public static bool IsSolid(BlockType type) => IsSolid((byte)type);
     }

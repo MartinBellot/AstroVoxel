@@ -44,6 +44,8 @@ namespace AstroVoxel.Player
         private Image[]    _slotRim;
         private RawImage[] _slotIcon;
         private int        _visibleIndex = -1;
+        private Material[] _materials;
+        private BlockType[] _hotbarCache = new BlockType[9];
 
         private Text   _blockLabel;
         private Image  _blockLabelBg;
@@ -72,6 +74,7 @@ namespace AstroVoxel.Player
         {
             _blockInteract = blockInteract;
             _playerBody    = playerBody;
+            _materials      = blockMaterials;
 
             BuildCrosshair(canvas);
             BuildHotbar(canvas, blockMaterials);
@@ -144,7 +147,18 @@ namespace AstroVoxel.Player
         {
             if (_blockInteract == null || _slotBg == null) return;
 
-            int idx = _blockInteract.PaletteIndex;
+            // Detecte les changements de contenu de hotbar
+            var hotbar = _blockInteract.Hotbar;
+            for (int i = 0; i < hotbar.Length && i < _slotIcon.Length; i++)
+            {
+                if (hotbar[i] != _hotbarCache[i])
+                {
+                    _hotbarCache[i] = hotbar[i];
+                    ApplyBlockColor(_slotIcon[i], hotbar[i], _materials);
+                }
+            }
+
+            int idx = _blockInteract.HotbarIndex;
             if (idx == _visibleIndex) return;
 
             // Désélectionne l'ancien
@@ -155,7 +169,7 @@ namespace AstroVoxel.Player
             AnimateSlot(_visibleIndex, true);
 
             // Label du bloc sélectionné
-            ShowBlockLabel(_blockInteract.ActiveBlock.ToString());
+            ShowBlockLabel(BlockFaceData.GetDisplayName((byte)_blockInteract.ActiveBlock));
         }
 
         private void AnimateSlot(int i, bool selected)
@@ -227,8 +241,8 @@ namespace AstroVoxel.Player
 
         private void BuildHotbar(Canvas canvas, Material[] blockMaterials)
         {
-            var palette = BlockInteraction.Palette;
-            int count   = palette.Length;
+            var hotbar = _blockInteract != null ? _blockInteract.Hotbar : new BlockType[9];
+            int count   = hotbar.Length;
 
             const float slotSize = 58f;
             const float gap      = 6f;
@@ -283,8 +297,9 @@ namespace AstroVoxel.Player
                 iconRT.anchoredPosition = new Vector2(xPos, 0f);
 
                 var rawImg = iconGO.AddComponent<RawImage>();
-                ApplyBlockColor(rawImg, palette[i], blockMaterials);
+                ApplyBlockColor(rawImg, hotbar[i], blockMaterials);
                 _slotIcon[i] = rawImg;
+                if (i < _hotbarCache.Length) _hotbarCache[i] = hotbar[i];
 
                 // Numéro du slot (petit label en bas)
                 var numGO  = new GameObject($"Slot_Num_{i}");
@@ -512,8 +527,9 @@ namespace AstroVoxel.Player
 
         private static void ApplyBlockColor(RawImage icon, BlockType blockType, Material[] materials)
         {
-            int idx = (int)blockType;
-            Material mat = (materials != null && idx >= 0 && idx < materials.Length) ? materials[idx] : null;
+            // Utilise l'ID de rendu "icône" (top/log-top pour les blocs multi-faces)
+            byte iconRid = BlockFaceData.GetIconRenderingId((byte)blockType);
+            Material mat = (materials != null && iconRid < materials.Length) ? materials[iconRid] : null;
 
             if (mat != null && mat.mainTexture is Texture2D tex)
             {
@@ -522,27 +538,13 @@ namespace AstroVoxel.Player
                 return;
             }
 
-            Color col = mat != null ? mat.color : GetFallbackColor(blockType);
+            Color col = BlockFaceData.GetFallbackColor(blockType);
             // Texture 1x1 solid
             var solidTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
             solidTex.SetPixel(0, 0, col);
             solidTex.Apply();
             icon.texture = solidTex;
             icon.color   = Color.white;
-        }
-
-        private static Color GetFallbackColor(BlockType t)
-        {
-            switch (t)
-            {
-                case BlockType.Stone:  return new Color(0.55f, 0.55f, 0.58f);
-                case BlockType.Dirt:   return new Color(0.60f, 0.38f, 0.16f);
-                case BlockType.Grass:  return new Color(0.25f, 0.68f, 0.20f);
-                case BlockType.Sand:   return new Color(0.92f, 0.84f, 0.42f);
-                case BlockType.Wood:   return new Color(0.62f, 0.40f, 0.18f);
-                case BlockType.Leaves: return new Color(0.16f, 0.50f, 0.12f);
-                default: return new Color(0.4f, 0.4f, 0.4f);
-            }
         }
 
         private static Font GetFont(int size)

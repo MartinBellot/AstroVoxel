@@ -21,24 +21,24 @@ namespace AstroVoxel.VoxelEngine
     {
         public readonly List<Vector3> Vertices = new List<Vector3>(4096);
         /// <summary>
-        /// Un sous-tableau de triangles par type de bloc (index = (byte)BlockType).
-        /// Permet d'avoir un submesh par matériau sans post-traitement.
+        /// 256 sous-tableaux de triangles, indexés par renderingId (byte).
+        /// renderingId = (byte)BlockType pour les blocs simples,
+        /// ou un ID de face-variant (200-216) pour les blocs multi-faces.
+        /// Permet d'avoir un submesh par matériau/face sans post-traitement.
         /// </summary>
-        public readonly List<int>[] Triangles;
+        public readonly List<int>[] Triangles = new List<int>[256];
         public readonly List<Vector2> UVs = new List<Vector2>(4096);
 
         public MeshData()
         {
-            int count = System.Enum.GetValues(typeof(BlockType)).Length;
-            Triangles = new List<int>[count];
-            for (int i = 0; i < count; i++)
-                Triangles[i] = new List<int>(512);
+            for (int i = 0; i < 256; i++)
+                Triangles[i] = new List<int>();
         }
 
         public void Clear()
         {
             Vertices.Clear();
-            foreach (var t in Triangles) t.Clear();
+            for (int i = 0; i < 256; i++) Triangles[i].Clear();
             UVs.Clear();
         }
 
@@ -108,6 +108,11 @@ namespace AstroVoxel.VoxelEngine
 
         private static void AddFace(MeshData output, int x, int y, int z, int face, byte blockId)
         {
+            // Détermine l'ID de sous-mesh (renderingId) pour cette combinaison bloc+face.
+            // Pour les blocs simples, renderingId == blockId.
+            // Pour les blocs multi-faces (Grass, Logs, Sandstone…), un ID variant (200+) est retourné.
+            byte renderingId = BlockFaceData.GetRenderingId(blockId, face);
+
             int vertexBase = output.Vertices.Count;
 
             // 4 vertices de la face
@@ -121,66 +126,21 @@ namespace AstroVoxel.VoxelEngine
                 ));
             }
 
-            // UVs (récupération depuis l'atlas)
-            Vector2 tileOffset = GetTextureOffset(blockId, face);
-            float ts = VoxelData.NormalizedBlockTextureSize;
+            // UVs simples [0,1] — chaque renderingId possède son propre material,
+            // donc pas d'atlas : on échantillonne toute la texture.
+            output.UVs.Add(new Vector2(0f, 0f));
+            output.UVs.Add(new Vector2(0f, 1f));
+            output.UVs.Add(new Vector2(1f, 0f));
+            output.UVs.Add(new Vector2(1f, 1f));
 
-            output.UVs.Add(tileOffset + new Vector2(0,  0));
-            output.UVs.Add(tileOffset + new Vector2(0,  ts));
-            output.UVs.Add(tileOffset + new Vector2(ts, 0));
-            output.UVs.Add(tileOffset + new Vector2(ts, ts));
-
-            // 2 triangles (quad) — route vers le submesh du bon type de bloc
-            var tris = output.Triangles[blockId];
+            // 2 triangles (quad) → sous-mesh du renderingId
+            var tris = output.Triangles[renderingId];
             tris.Add(vertexBase + 0);
             tris.Add(vertexBase + 1);
             tris.Add(vertexBase + 2);
             tris.Add(vertexBase + 2);
             tris.Add(vertexBase + 1);
             tris.Add(vertexBase + 3);
-        }
-
-        // ── Mappage bloc → tuile d'atlas ─────────────────────
-
-        /// <summary>
-        /// Retourne le coin bas-gauche (UV normalisé) de la tuile de texture
-        /// pour un bloc et une face donnés.
-        /// Étendre ici pour des textures différentes par face (ex: Grass top ≠ côtés).
-        /// </summary>
-        private static Vector2 GetTextureOffset(byte blockId, int face)
-        {
-            int tileX, tileY;
-
-            // Convention : tuile (col=0, row=0) = coin bas-gauche de l'atlas.
-            switch ((BlockType)blockId)
-            {
-                case BlockType.Grass:
-                    if (face == 0)        { tileX = 0; tileY = 3; } // Top : herbe
-                    else if (face == 1)   { tileX = 2; tileY = 0; } // Bottom : terre
-                    else                  { tileX = 1; tileY = 3; } // Côtés : herbe-dirt
-                    break;
-                case BlockType.Dirt:
-                    tileX = 2; tileY = 0;
-                    break;
-                case BlockType.Stone:
-                    tileX = 0; tileY = 0;
-                    break;
-                case BlockType.Sand:
-                    tileX = 2; tileY = 1;
-                    break;
-                case BlockType.Wood:
-                    tileX = face == 0 || face == 1 ? 2 : 1; tileY = 1;
-                    break;
-                case BlockType.Leaves:
-                    tileX = 1; tileY = 0;
-                    break;
-                default:
-                    tileX = 0; tileY = 0;
-                    break;
-            }
-
-            float ts = VoxelData.NormalizedBlockTextureSize;
-            return new Vector2(tileX * ts, tileY * ts);
         }
     }
 }
