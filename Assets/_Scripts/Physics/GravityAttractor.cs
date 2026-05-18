@@ -15,8 +15,10 @@ namespace AstroVoxel.Physics
     /// </summary>
     public sealed class GravityAttractor : MonoBehaviour
     {
-        [Tooltip("Accélération gravitationnelle en m/s².")]
-        [SerializeField] private float gravityForce = 9.81f;
+        [Tooltip("Accélération gravitationnelle en m/s². " +
+                 "13.54 = équivalent continu de la gravité Minecraft " +
+                 "(hauteur de saut 1.252 bloc, apex à 0.43 s).")]
+        [SerializeField] private float gravityForce = 13.54f;
 
         /// <summary>Accélération gravitationnelle (lecture publique).</summary>
         public float GravityForce => gravityForce;

@@ -159,7 +159,9 @@ namespace AstroVoxel.Bootstrap
             rb.useGravity     = false;
             rb.freezeRotation = true;
             rb.mass           = 70f;
-            rb.linearDamping  = 0.5f;
+            // Pas d'amortissement Unity : PlayerController applique sa propre friction
+            // pour stopper net dès que les touches sont relâchées (anti-dérive).
+            rb.linearDamping  = 0f;
             rb.angularDamping = 0.05f;
             rb.interpolation  = RigidbodyInterpolation.Interpolate;
             rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
