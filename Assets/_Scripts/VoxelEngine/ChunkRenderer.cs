@@ -188,7 +188,23 @@ namespace AstroVoxel.VoxelEngine
         public void RebuildMesh()
         {
             _meshData.Clear();
-            ChunkMeshBuilder.Build(_chunkData, _meshData, GetNeighbourForMesh);
+            // En mode planétaire, on passe la rotation + l'origine world du chunk
+            // et le centre de la planète afin que ChunkMeshBuilder oriente les
+            // blocs multi-faces (Grass, etc.) par rapport au CENTRE de la planète
+            // — la face « top » du grass pointe toujours radialement vers
+            // l'extérieur, indépendamment de la face cube-sphère du chunk.
+            if (_world != null)
+            {
+                ChunkMeshBuilder.Build(_chunkData, _meshData, GetNeighbourForMesh,
+                    useRadialOrientation: true,
+                    chunkRotation:        _chunkRotation,
+                    chunkOriginWorld:     transform.position,
+                    planetCenter:         _planetCenter);
+            }
+            else
+            {
+                ChunkMeshBuilder.Build(_chunkData, _meshData, GetNeighbourForMesh);
+            }
 
             // ── Collecte des sous-meshes non vides ───────────────
             // Seuls les renderingIds ayant des triangles deviennent des submeshes Unity.

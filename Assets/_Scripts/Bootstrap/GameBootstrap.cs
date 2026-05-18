@@ -275,10 +275,11 @@ namespace AstroVoxel.Bootstrap
             hud.Init(canvas, blockInteract, playerBody, builtMaterials);
 
             // Inventaire créatif (touche E)
+            // On passe les RectTransforms des slots hotbar pour le drag&drop ciblé par slot.
             var invGO = new GameObject("CreativeInventory");
             invGO.transform.SetParent(canvasGO.transform, false);
             var inv = invGO.AddComponent<CreativeInventory>();
-            inv.Init(canvas, blockInteract, builtMaterials);
+            inv.Init(canvas, blockInteract, builtMaterials, hud.HotbarSlotRects);
         }
 
         // ── Construction du vaisseau spatial ─────────────────

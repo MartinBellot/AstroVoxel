@@ -44,8 +44,9 @@ namespace AstroVoxel.Player
         private Image[]    _slotRim;
         private RawImage[] _slotIcon;
         private int        _visibleIndex = -1;
-        private Material[] _materials;
-        private BlockType[] _hotbarCache = new BlockType[9];
+        private Material[]      _materials;
+        private BlockType[]     _hotbarCache   = new BlockType[9];
+        private RectTransform[] _hotbarSlotRTs;
 
         private Text   _blockLabel;
         private Image  _blockLabelBg;
@@ -64,7 +65,10 @@ namespace AstroVoxel.Player
         // Animation selection pulse
         private Coroutine _pulseCoroutine;
 
-        // ── Public Init ───────────────────────────────────────
+        // ── Public API ───────────────────────────────────────
+
+        /// <summary>RectTransforms des slots hotbar pour la détection de drop drag&amp;drop.</summary>
+        public RectTransform[] HotbarSlotRects => _hotbarSlotRTs;
 
         public void Init(
             Canvas canvas,
@@ -263,9 +267,10 @@ namespace AstroVoxel.Player
             hotbarBg.color = _bgDeep;
             MakeRounded(hotbarBg, radius);
 
-            _slotBg   = new Image[count];
-            _slotRim  = new Image[count];
-            _slotIcon = new RawImage[count];
+            _slotBg       = new Image[count];
+            _slotRim      = new Image[count];
+            _slotIcon     = new RawImage[count];
+            _hotbarSlotRTs = new RectTransform[count];
 
             float startX = -(totalW * 0.5f) + padding + slotSize * 0.5f;
 
@@ -276,7 +281,8 @@ namespace AstroVoxel.Player
                 // Fond du slot (arrondi)
                 var slotBgGO = CreateRect($"Slot_BG_{i}", hotbarRoot,
                     new Vector2(xPos, 0f), new Vector2(slotSize, slotSize), _bg);
-                _slotBg[i] = slotBgGO.GetComponent<Image>();
+                _slotBg[i]       = slotBgGO.GetComponent<Image>();
+                _hotbarSlotRTs[i] = slotBgGO.GetComponent<RectTransform>();
                 MakeRounded(_slotBg[i], 12f);
 
                 // Rim du slot (sélection = accent bleu)
@@ -534,7 +540,7 @@ namespace AstroVoxel.Player
             if (mat != null && mat.mainTexture is Texture2D tex)
             {
                 icon.texture = tex;
-                icon.color   = Color.white;
+                icon.color   = mat.color;   // Applique la teinte biome (_BaseColor du matériau)
                 return;
             }
 
