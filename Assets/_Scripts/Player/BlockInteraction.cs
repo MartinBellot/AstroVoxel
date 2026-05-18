@@ -97,15 +97,33 @@ namespace AstroVoxel.Player
             if (Raycast(out RaycastHit hit))
             {
                 Vector3 blockCenter = hit.point - hit.normal * 0.5f;
-                _targetBlockPos = new Vector3(
-                    Mathf.FloorToInt(blockCenter.x),
-                    Mathf.FloorToInt(blockCenter.y),
-                    Mathf.FloorToInt(blockCenter.z));
 
-                if (blockHighlight != null)
+                // Positionne le highlight en espace local du chunk (tient compte
+                // de la rotation du chunk pour les faces diagonales 18-faces).
+                ChunkRenderer cr = world != null ? world.GetChunkAt(blockCenter) : null;
+                if (cr != null)
                 {
-                    blockHighlight.position = _targetBlockPos.Value;
-                    blockHighlight.gameObject.SetActive(true);
+                    Vector3Int lb = world.WorldToLocalBlock(blockCenter);
+                    _targetBlockPos = cr.transform.TransformPoint(lb.x, lb.y, lb.z);
+                    if (blockHighlight != null)
+                    {
+                        blockHighlight.position = _targetBlockPos.Value;
+                        blockHighlight.rotation = cr.transform.rotation;
+                        blockHighlight.gameObject.SetActive(true);
+                    }
+                }
+                else
+                {
+                    // Repli si chunk non chargé
+                    _targetBlockPos = new Vector3(
+                        Mathf.FloorToInt(blockCenter.x),
+                        Mathf.FloorToInt(blockCenter.y),
+                        Mathf.FloorToInt(blockCenter.z));
+                    if (blockHighlight != null)
+                    {
+                        blockHighlight.position = _targetBlockPos.Value;
+                        blockHighlight.gameObject.SetActive(true);
+                    }
                 }
             }
             else

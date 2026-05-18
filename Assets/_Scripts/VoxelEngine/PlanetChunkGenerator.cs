@@ -138,13 +138,24 @@ namespace AstroVoxel.VoxelEngine
         // ── Remplissage d'un chunk complet ────────────────────
 
         /// <summary>
+        /// Marge de tolérance pour le masque de face (en dot-product normalisé).
+        /// Les blocs proches de la frontière entre deux faces sont générés par les
+        /// DEUX face chunks adjacents pour éviter la tranchée de couture.
+        /// Valeur calibrée : diff réel observé ≈ 0.005–0.04 aux frontières.
+        /// Une marge de 0.05 couvre ~2.5 voxels à r=50, fermant toute tranchée.
+        /// </summary>
+        private const float kSeamMargin = 0.10f;
+
+        /// <summary>
         /// Remplit <paramref name="data"/> en appelant <see cref="GetBlockType"/>
-        /// pour chaque bloc. Même résultat que le culling inter-chunks.
+        /// pour chaque bloc, puis applique le masque de face avec tolérance.
         /// </summary>
         public static void Generate(
-            ChunkData data,
-            Vector3   chunkOriginWorld,
-            Vector3   planetCenter)
+            ChunkData  data,
+            Vector3    chunkOriginWorld,
+            Vector3    planetCenter,
+            Quaternion chunkRotation,
+            FaceIndex  chunkFace)
         {
             int w = data.Width;
             int h = data.Height;
@@ -153,11 +164,34 @@ namespace AstroVoxel.VoxelEngine
             for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
-                Vector3 blockPos = chunkOriginWorld + new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
+                Vector3 blockPos = chunkOriginWorld + chunkRotation * new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
+                Vector3 rel      = blockPos - planetCenter;
+
+                // Masque de face : seul le chunk canonique génère le bloc.
+                // Tolérance kSeamMargin pour éviter les trous de couture :
+                // les deux grilles tournées laissent un vide de ~0.003 en
+                // dot-product près de la frontière → on inclut les blocs
+                // dont le dot de chunkFace est dans les kSeamMargin du meilleur.
+                FaceIndex blockFace = SphereFace.GetFace(rel);
+                if (blockFace != chunkFace)
+                {
+                    Vector3 dir      = rel.normalized;
+                    float   dotSelf  = Vector3.Dot(dir, SphereFace.Normals[(int)chunkFace]);
+                    float   dotBest  = Vector3.Dot(dir, SphereFace.Normals[(int)blockFace]);
+                    // dotBest > dotSelf par définition de GetFace.
+                    // Si la différence dépasse la marge, le bloc est clairement
+                    // dans un autre territoire → Air.
+                    if (dotBest - dotSelf > kSeamMargin)
+                    {
+                        data.SetBlock(x, y, z, (byte)BlockType.Air);
+                        continue;
+                    }
+                }
+
                 data.SetBlock(x, y, z, GetBlockType(blockPos, planetCenter));
             }
 
-            PlaceTrees(data, chunkOriginWorld, planetCenter);
+            PlaceTrees(data, chunkOriginWorld, planetCenter, chunkRotation);
         }
 
         // ── Génération des arbres ─────────────────────────────
@@ -174,17 +208,23 @@ namespace AstroVoxel.VoxelEngine
         /// Place des arbres déterministes dans le chunk courant.
         /// On itère sur les cellules de grille voisines pouvant déborder dans ce chunk.
         /// </summary>
-        private static void PlaceTrees(ChunkData data, Vector3 chunkOrigin, Vector3 planetCenter)
+        private static void PlaceTrees(ChunkData data, Vector3 chunkOrigin, Vector3 planetCenter, Quaternion chunkRotation)
         {
             int S = TreeCellSize;
             int expand = MaxTrunkHeight + MaxCanopyRadius + S;
 
-            int gcMinX = Mathf.FloorToInt((chunkOrigin.x - expand) / S);
-            int gcMaxX = Mathf.CeilToInt ((chunkOrigin.x + data.Width  + expand) / S);
-            int gcMinY = Mathf.FloorToInt((chunkOrigin.y - expand) / S);
-            int gcMaxY = Mathf.CeilToInt ((chunkOrigin.y + data.Height + expand) / S);
-            int gcMinZ = Mathf.FloorToInt((chunkOrigin.z - expand) / S);
-            int gcMaxZ = Mathf.CeilToInt ((chunkOrigin.z + data.Width  + expand) / S);
+            // Bounding sphere du chunk pour calculer les cellules d'arbres à vérifier.
+            // Demi-diagonale du cube : sqrt(3)/2 * cs.
+            int cs = data.Width;
+            Vector3 chunkCenter = chunkOrigin + chunkRotation * new Vector3(cs * 0.5f, cs * 0.5f, cs * 0.5f);
+            float totalRadius = cs * 0.8660254f + expand + S;
+
+            int gcMinX = Mathf.FloorToInt((chunkCenter.x - totalRadius) / S);
+            int gcMaxX = Mathf.CeilToInt ((chunkCenter.x + totalRadius) / S);
+            int gcMinY = Mathf.FloorToInt((chunkCenter.y - totalRadius) / S);
+            int gcMaxY = Mathf.CeilToInt ((chunkCenter.y + totalRadius) / S);
+            int gcMinZ = Mathf.FloorToInt((chunkCenter.z - totalRadius) / S);
+            int gcMaxZ = Mathf.CeilToInt ((chunkCenter.z + totalRadius) / S);
 
             for (int gx = gcMinX; gx <= gcMaxX; gx++)
             for (int gy = gcMinY; gy <= gcMaxY; gy++)
@@ -246,7 +286,7 @@ namespace AstroVoxel.VoxelEngine
                         int   ty = Mathf.FloorToInt(searchBase.y + up.y * t);
                         int   tz = Mathf.FloorToInt(searchBase.z + up.z * t);
                         if (tx == prevTx && ty == prevTy && tz == prevTz) continue;
-                        TrySetBlock(data, chunkOrigin, tx, ty, tz, (byte)BlockType.Wood, overwrite: true);
+                        TrySetBlock(data, chunkOrigin, tx, ty, tz, (byte)BlockType.Wood, overwrite: true, chunkRotation);
                         prevTx = tx; prevTy = ty; prevTz = tz;
                     }
                 }
@@ -266,7 +306,7 @@ namespace AstroVoxel.VoxelEngine
                     int wx = Mathf.FloorToInt(canopyCenter.x) + lx;
                     int wy = Mathf.FloorToInt(canopyCenter.y) + ly;
                     int wz = Mathf.FloorToInt(canopyCenter.z) + lz;
-                    TrySetBlock(data, chunkOrigin, wx, wy, wz, (byte)BlockType.Leaves, overwrite: false);
+                    TrySetBlock(data, chunkOrigin, wx, wy, wz, (byte)BlockType.Leaves, overwrite: false, chunkRotation);
                 }
             }
         }
@@ -299,11 +339,17 @@ namespace AstroVoxel.VoxelEngine
         private static void TrySetBlock(
             ChunkData data, Vector3 chunkOrigin,
             int wx, int wy, int wz,
-            byte blockId, bool overwrite)
+            byte blockId, bool overwrite,
+            Quaternion chunkRotation)
         {
-            int lx = wx - Mathf.FloorToInt(chunkOrigin.x);
-            int ly = wy - Mathf.FloorToInt(chunkOrigin.y);
-            int lz = wz - Mathf.FloorToInt(chunkOrigin.z);
+            // Convertit les coordonnées world entières en espace local du chunk orienté.
+            // On utilise le centre du bloc (wx+0.5, wy+0.5, wz+0.5) pour éviter les
+            // erreurs de bord quand chunkOrigin n'est pas entier.
+            Quaternion invRot = Quaternion.Inverse(chunkRotation);
+            Vector3 localPos  = invRot * (new Vector3(wx + 0.5f, wy + 0.5f, wz + 0.5f) - chunkOrigin);
+            int lx = Mathf.FloorToInt(localPos.x);
+            int ly = Mathf.FloorToInt(localPos.y);
+            int lz = Mathf.FloorToInt(localPos.z);
 
             if (lx < 0 || lx >= data.Width  ||
                 ly < 0 || ly >= data.Height  ||

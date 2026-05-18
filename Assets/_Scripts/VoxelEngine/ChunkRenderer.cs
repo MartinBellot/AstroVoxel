@@ -35,6 +35,8 @@ namespace AstroVoxel.VoxelEngine
         private Vector3    _planetCenter;
         private Material[] _blockMaterials;   // index = (byte)BlockType
         private PlanetWorld _world;           // référence pour la lookup des voisins réels
+        private Quaternion _chunkRotation;    // rotation de ce chunk (local +Y = radial sortant)
+        private FaceIndex  _chunkFace;        // face canonique (masque de génération)
 
         // ── Inspector (mode plat standalone) ─────────────────
         [Header("Génération du terrain (mode standalone)")]
@@ -83,14 +85,16 @@ namespace AstroVoxel.VoxelEngine
         public byte GetBlock(int x, int y, int z) => _chunkData.GetBlock(x, y, z);
 
         /// <summary>
-        /// Initialise ce chunk en mode planétaire (grille 3D axis-aligned).
+        /// Initialise ce chunk en mode planétaire (18-Face Cube-Sphère Octaédrique).
         /// Appelé par <see cref="PlanetWorld"/> juste après AddComponent.
         /// </summary>
-        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter, PlanetWorld world, Material[] blockMaterials = null)
+        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter, PlanetWorld world, Quaternion chunkRotation, FaceIndex chunkFace, Material[] blockMaterials = null)
         {
             _planetCenter   = planetCenter;
             _blockMaterials = blockMaterials;
             _world          = world;
+            _chunkRotation  = chunkRotation;
+            _chunkFace      = chunkFace;
 
             // Awake peut ne pas encore avoir été appelé si AddComponent vient de se faire
             if (_mesh == null)
@@ -103,7 +107,7 @@ namespace AstroVoxel.VoxelEngine
             }
 
             _chunkData = new ChunkData();
-            PlanetChunkGenerator.Generate(_chunkData, worldOrigin, _planetCenter);
+            PlanetChunkGenerator.Generate(_chunkData, worldOrigin, _planetCenter, _chunkRotation, _chunkFace);
 
             RebuildMesh();
         }
@@ -118,8 +122,9 @@ namespace AstroVoxel.VoxelEngine
         /// </summary>
         private byte GetNeighbourForMesh(int lx, int ly, int lz)
         {
-            // Convertit coords locales OOB → position world du centre du voxel
-            Vector3 worldPos = transform.position + new Vector3(lx + 0.5f, ly + 0.5f, lz + 0.5f);
+            // Convertit coords locales OOB → position world du centre du voxel.
+            // TransformPoint applique position + rotation du chunk, sans mise à l'échelle.
+            Vector3 worldPos = transform.TransformPoint(lx + 0.5f, ly + 0.5f, lz + 0.5f);
 
             if (_world != null)
             {

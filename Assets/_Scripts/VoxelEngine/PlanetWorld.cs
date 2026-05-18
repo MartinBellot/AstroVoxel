@@ -1,38 +1,27 @@
 // ============================================================
 //  PlanetWorld.cs
-//  Grille 3D de chunks cubiques autour d'une planète sphérique.
-//  Approche correcte : chunks axis-aligned, sphère déterminée
-//  uniquement par Vector3.Distance dans le générateur.
-//  Pas de face-based logic — couvre toute la sphère sans zones mortes.
+//  Système 18-Face Cube-Sphère Octaédrique.
+//
+//  ARCHITECTURE :
+//  • Clé de chunk = FaceChunkCoord (face + U/V/R en face-local).
+//    Chaque chunk a une rotation alignée avec sa face → blocs
+//    orientés radialement → pas d'effet escalier.
+//  • Spawning : parcours de la SPHÈRE COMPLÈTE (grille world-alignée
+//    couvrant shellMin..shellMax). Pour une petite planète (~300
+//    chunks) on charge tout d'un coup au démarrage ; UpdateChunks
+//    ne refait le test que si un chunk manque.
+//  • Lookups (GetChunkAt, WorldToLocalBlock) utilisent les axes
+//    face-locaux → cohérents avec les données générées.
 // ============================================================
 
-using System.Collections.Generic;
+using System.Collections.Generic;   // Dictionary
 using UnityEngine;
 
 namespace AstroVoxel.VoxelEngine
 {
     /// <summary>
-    /// Coordonnée 3D d'un chunk dans la grille monde.
-    /// Un chunk couvre les blocs [X*16, X*16+16) × [Y*16 ...] × [Z*16 ...]
-    /// </summary>
-    public readonly struct ChunkCoord : System.IEquatable<ChunkCoord>
-    {
-        public readonly int X, Y, Z;
-
-        public ChunkCoord(int x, int y, int z) { X = x; Y = y; Z = z; }
-
-        public bool Equals(ChunkCoord o) => X == o.X && Y == o.Y && Z == o.Z;
-        public override bool Equals(object obj) => obj is ChunkCoord c && Equals(c);
-        public override int GetHashCode()
-        {
-            unchecked { return (X * 73856093) ^ (Y * 19349663) ^ (Z * 83492791); }
-        }
-        public override string ToString() => $"({X},{Y},{Z})";
-    }
-
-    /// <summary>
     /// MonoBehaviour racine de la planète.
-    /// Gère la grille 3D de chunks cubiques autour du viewer.
+    /// Gère la grille de chunks orientés (18-Face Cube-Sphère Octaédrique).
     /// Expose l'API de lecture/écriture de blocs en world-space.
     /// </summary>
     public sealed class PlanetWorld : MonoBehaviour
@@ -41,18 +30,15 @@ namespace AstroVoxel.VoxelEngine
         [Header("Planète")]
         [SerializeField] public float planetRadius = 165f;
 
-        [Header("Chunks")]
-        [Tooltip("Distance en chunks autour du joueur (recommandé : 3-4).")]
-        [SerializeField] private int renderDistanceChunks = 3;
-
-        [Tooltip("Matériau appliqué à chaque chunk.")]
-        [SerializeField] public Material[] blockMaterials;   // index = (byte)BlockType
+        [Tooltip("Matériaux par type de bloc (index = (byte)BlockType).")]
+        [SerializeField] public Material[] blockMaterials;
 
         // ── État interne ───────────────────────────────────────
-        private readonly Dictionary<ChunkCoord, ChunkRenderer> _chunks
-            = new Dictionary<ChunkCoord, ChunkRenderer>();
+        private readonly Dictionary<FaceChunkCoord, ChunkRenderer> _chunks
+            = new Dictionary<FaceChunkCoord, ChunkRenderer>();
 
-        private Transform _viewer;
+        private Transform _viewer;          // non utilisé pour le spawning, gardé pour l'API
+        private bool _planetLoaded = false; // évite de respawner tous les chunks à chaque frame
 
         // ── API publique ──────────────────────────────────────
 
@@ -60,94 +46,102 @@ namespace AstroVoxel.VoxelEngine
 
         public void SetViewer(Transform viewer) => _viewer = viewer;
 
-        /// <summary>Appelé à chaque frame pour charger/décharger les chunks.</summary>
+        // ── Gestion des chunks ────────────────────────────────
+
+        /// <summary>
+        /// Charge toute la coque planétaire en un seul passage.
+        ///
+        /// ALGORITHME : grille world-alignée au pas cs/2 (= 8 blocs).
+        ///
+        ///   Garantie mathématique de couverture complète :
+        ///   • Chaque chunk face-local est un cube de côté cs=16 dans
+        ///     l'espace face-local (les axes Rights/Normals/Forwards sont
+        ///     orthonormaux, axial ET diagonal).
+        ///   • Rayon de la sphère inscrite = cs/2 = 8.
+        ///   • Distance max d'un point quelconque à son voisin de grille
+        ///     avec pas h = cs/2 : h·√3/2 ≈ 6,93.
+        ///   • 6,93 < 8 → tout cube face-local contient TOUJOURS au moins
+        ///     un point de la grille à cs/2.
+        ///   → Aucun chunk canonique ne peut être manqué.
+        ///
+        ///   Avec cs=16, pas=8 : maxS=10, boucle 21³=9261, ~2 000 dans la
+        ///   coque après filtrage → totalement négligeable au démarrage.
+        /// </summary>
         public void UpdateChunks()
         {
-            if (_viewer == null) return;
+            if (_planetLoaded) return;
 
-            int   cs    = VoxelData.ChunkWidth;          // 16
-            float coreR = PlanetChunkGenerator.PlanetCoreRadius;
-            float amp   = PlanetChunkGenerator.SurfaceAmplitude;
-
-            // Rayon de la demi-diagonale d'un chunk cubique
-            float halfDiag = cs * 0.8660254f; // sqrt(3)/2 * cs
-
-            // Limite extérieure : rejeter les chunks entièrement hors de la planète
+            int   cs       = VoxelData.ChunkWidth;
+            float coreR    = PlanetChunkGenerator.PlanetCoreRadius;
+            float amp      = PlanetChunkGenerator.SurfaceAmplitude;
+            float crust    = PlanetChunkGenerator.CrustThickness;
+            float halfDiag = cs * 0.8660254f;   // √3/2 * cs
             float shellMax = coreR + amp + 2f + halfDiag;
+            float shellMin = coreR - crust - halfDiag;
 
-            // Coordonnées de chunk du viewer
-            Vector3 vw = _viewer.position - PlanetCenter;
-            int vcx = Mathf.FloorToInt(vw.x / cs);
-            int vcy = Mathf.FloorToInt(vw.y / cs);
-            int vcz = Mathf.FloorToInt(vw.z / cs);
+            // Pas d'échantillonnage = cs/2 pour garantir la couverture complète.
+            // +2 au lieu de +1 pour garantir les extrémités des faces axiales.
+            float step = cs * 0.5f;
+            int   maxS = Mathf.CeilToInt(shellMax / step) + 2;
 
-            int rd      = renderDistanceChunks;
-
-            var toKeep  = new HashSet<ChunkCoord>();
-
-            for (int dz = -rd; dz <= rd; dz++)
-            for (int dy = -rd; dy <= rd; dy++)
-            for (int dx = -rd; dx <= rd; dx++)
+            for (int dz = -maxS; dz <= maxS; dz++)
+            for (int dy = -maxS; dy <= maxS; dy++)
+            for (int dx = -maxS; dx <= maxS; dx++)
             {
-                int cx = vcx + dx;
-                int cy = vcy + dy;
-                int cz = vcz + dz;
+                float fx = (dx + 0.5f) * step;
+                float fy = (dy + 0.5f) * step;
+                float fz = (dz + 0.5f) * step;
+                float dist = Mathf.Sqrt(fx * fx + fy * fy + fz * fz);
 
-                // Centre du chunk en coordonnées locales planète
-                Vector3 chunkCenter = new Vector3(
-                    (cx + 0.5f) * cs,
-                    (cy + 0.5f) * cs,
-                    (cz + 0.5f) * cs) - PlanetCenter;
+                if (dist > shellMax || dist < shellMin) continue;
 
-                float dist = chunkCenter.magnitude;
+                // Chunk canonique du point (18-faces) — plusieurs points peuvent
+                // mapper vers le même chunk : ContainsKey le déduplique.
+                var sample = new Vector3(fx, fy, fz);
+                FaceIndex fi = SphereFace.GetFace(sample);
+                int       f  = (int)fi;
 
-                // Ne charger que les chunks dans la planète — l'intérieur est plein
-                // (Stone ou grotte). La boucle ±rd limite déjà la portée autour du joueur.
-                if (dist > shellMax) continue;
+                int U = Mathf.FloorToInt(Vector3.Dot(sample, SphereFace.Rights  [f]) / cs);
+                int V = Mathf.FloorToInt(Vector3.Dot(sample, SphereFace.Forwards[f]) / cs);
+                int R = Mathf.FloorToInt(Vector3.Dot(sample, SphereFace.Normals [f]) / cs);
 
-                ChunkCoord coord = new ChunkCoord(cx, cy, cz);
-                toKeep.Add(coord);
-
+                var coord = new FaceChunkCoord(fi, U, V, R);
                 if (!_chunks.ContainsKey(coord))
                     SpawnChunk(coord);
             }
 
-            // Décharge les chunks hors range
-            var toRemove = new List<ChunkCoord>();
-            foreach (var kv in _chunks)
-                if (!toKeep.Contains(kv.Key))
-                    toRemove.Add(kv.Key);
-
-            foreach (var coord in toRemove)
-            {
-                if (_chunks.TryGetValue(coord, out ChunkRenderer cr))
-                    Destroy(cr.gameObject);
-                _chunks.Remove(coord);
-            }
+            _planetLoaded = true;
         }
 
         // ── Lecture / Écriture de blocs (world-space) ─────────
 
+        /// <summary>Retourne le ChunkRenderer qui contient worldPos, ou null.</summary>
         public ChunkRenderer GetChunkAt(Vector3 worldPos)
         {
-            _chunks.TryGetValue(WorldToChunkCoord(worldPos), out ChunkRenderer cr);
+            _chunks.TryGetValue(WorldToFaceChunk(worldPos), out ChunkRenderer cr);
             return cr;
         }
 
+        /// <summary>
+        /// Convertit une position world en coordonnées locales (lx, ly, lz)
+        /// dans le chunk canonique de cette position.
+        /// Propriété algébrique : retourne toujours [0, ChunkWidth-1]³.
+        /// </summary>
         public Vector3Int WorldToLocalBlock(Vector3 worldPos)
         {
             int cs = VoxelData.ChunkWidth;
-            // Soustrait PlanetCenter pour rester dans le référentiel planète,
-            // cohérent avec WorldToChunkCoord.
-            Vector3 local = worldPos - PlanetCenter;
-            ChunkCoord cc = WorldToChunkCoord(worldPos);
-            int bx = Mathf.FloorToInt(local.x);
-            int by = Mathf.FloorToInt(local.y);
-            int bz = Mathf.FloorToInt(local.z);
+            FaceChunkCoord fc = WorldToFaceChunk(worldPos);
+            int fi = (int)fc.Face;
+
+            Vector3 rel = worldPos - PlanetCenter;
+            int gu = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Rights  [fi]));
+            int gr = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Normals [fi]));
+            int gv = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Forwards[fi]));
+
             return new Vector3Int(
-                bx - cc.X * cs,
-                by - cc.Y * cs,
-                bz - cc.Z * cs);
+                gu - fc.U * cs,   // local X  (selon Rights)
+                gr - fc.R * cs,   // local Y  (radial, selon Normals)
+                gv - fc.V * cs);  // local Z  (selon Forwards)
         }
 
         public bool BreakBlock(Vector3 worldPos)
@@ -175,65 +169,80 @@ namespace AstroVoxel.VoxelEngine
         // ── Interne ───────────────────────────────────────────
 
         /// <summary>
-        /// Rebuild les chunks voisins qui partagent une face avec le bloc modifié.
-        /// Nécessaire pour que les faces OOB dans le chunk voisin tiennent compte
-        /// des données réelles (blocs cassés/posés) plutôt que du générateur.
+        /// Convertit une position world en FaceChunkCoord (face canonique + U/V/R).
+        /// </summary>
+        public FaceChunkCoord WorldToFaceChunk(Vector3 worldPos)
+        {
+            int cs = VoxelData.ChunkWidth;
+            Vector3 rel = worldPos - PlanetCenter;
+            FaceIndex fi = SphereFace.GetFace(rel);
+            int face = (int)fi;
+
+            int U = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Rights  [face]) / cs);
+            int V = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Forwards[face]) / cs);
+            int R = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Normals [face]) / cs);
+
+            return new FaceChunkCoord(fi, U, V, R);
+        }
+
+        /// <summary>
+        /// Reconstruit les chunks voisins qui partagent une face avec le bloc modifié.
+        /// Les offsets FaceChecks sont en espace local du chunk (local +Y = radial).
+        /// Convertis en world-space via la rotation du chunk.
         /// </summary>
         private void RebuildNeighbourChunks(Vector3 modifiedWorldPos)
         {
-            ChunkCoord selfCoord = WorldToChunkCoord(modifiedWorldPos);
+            FaceChunkCoord selfCoord = WorldToFaceChunk(modifiedWorldPos);
+            Quaternion rot = SphereFace.GetRotation(selfCoord.Face);
 
-            for (int face = 0; face < 6; face++)
+            for (int f = 0; f < 6; f++)
             {
-                Vector3 neighbourPos = modifiedWorldPos + new Vector3(
-                    VoxelData.FaceChecks[face, 0],
-                    VoxelData.FaceChecks[face, 1],
-                    VoxelData.FaceChecks[face, 2]);
+                Vector3 localOffset = new Vector3(
+                    VoxelData.FaceChecks[f, 0],
+                    VoxelData.FaceChecks[f, 1],
+                    VoxelData.FaceChecks[f, 2]);
 
-                ChunkCoord neighbourCoord = WorldToChunkCoord(neighbourPos);
-                if (neighbourCoord.Equals(selfCoord)) continue;  // même chunk, déjà rebuild
+                Vector3 neighbourWorldPos = modifiedWorldPos + rot * localOffset;
+                FaceChunkCoord neighbourCoord = WorldToFaceChunk(neighbourWorldPos);
+
+                if (neighbourCoord.Equals(selfCoord)) continue;
 
                 if (_chunks.TryGetValue(neighbourCoord, out ChunkRenderer neighbour))
                     neighbour.RebuildMesh();
             }
         }
 
-        private void SpawnChunk(ChunkCoord coord)
+        private void SpawnChunk(FaceChunkCoord coord)
         {
-            int     cs       = VoxelData.ChunkWidth;
-            Vector3 worldPos = PlanetCenter + new Vector3(coord.X, coord.Y, coord.Z) * cs;
+            int cs   = VoxelData.ChunkWidth;
+            int fi   = (int)coord.Face;
+
+            Vector3 origin = PlanetCenter
+                + SphereFace.Rights  [fi] * (coord.U * cs)
+                + SphereFace.Normals [fi] * (coord.R * cs)
+                + SphereFace.Forwards[fi] * (coord.V * cs);
+
+            Quaternion rot = SphereFace.GetRotation(coord.Face);
 
             var go = new GameObject($"Chunk_{coord}");
             go.transform.SetParent(transform, worldPositionStays: true);
-            go.transform.position = worldPos;
-            // Pas de rotation — chunks axis-aligned
+            go.transform.position = origin;
+            go.transform.rotation = rot;
 
             var mr = go.AddComponent<MeshRenderer>();
-            // Le MeshRenderer est configuré par ChunkRenderer.RebuildMesh via blockMaterials.
-            // Un matériau par défaut est requis pour éviter un warning Unity.
             mr.sharedMaterial = (blockMaterials != null && blockMaterials.Length > 0 && blockMaterials[0] != null)
                 ? blockMaterials[0]
                 : new Material(Shader.Find("Universal Render Pipeline/Lit"));
 
             var cr = go.AddComponent<ChunkRenderer>();
-            cr.InitFromWorld(worldPos, PlanetCenter, this, blockMaterials);
+            cr.InitFromWorld(origin, PlanetCenter, this, rot, coord.Face, blockMaterials);
 
             _chunks[coord] = cr;
         }
 
-        private ChunkCoord WorldToChunkCoord(Vector3 worldPos)
-        {
-            int cs = VoxelData.ChunkWidth;
-            // Soustrait le centre planète pour rester dans le référentiel local
-            Vector3 local = worldPos - PlanetCenter;
-            return new ChunkCoord(
-                Mathf.FloorToInt(local.x / cs),
-                Mathf.FloorToInt(local.y / cs),
-                Mathf.FloorToInt(local.z / cs));
-        }
-
         // ── Cycle de vie ──────────────────────────────────────
 
-        private void Update() => UpdateChunks();
+        private void Start()  => UpdateChunks();
+        private void Update() { /* chunks statiques ; rien à faire chaque frame */ }
     }
 }

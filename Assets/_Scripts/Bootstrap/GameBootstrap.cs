@@ -160,8 +160,11 @@ namespace AstroVoxel.Bootstrap
             // La surface est à PlanetCoreRadius ± SurfaceAmplitude/2 du centre.
             float surfaceApprox = PlanetChunkGenerator.PlanetCoreRadius + 2f;
             float spawnDist = surfaceApprox + spawnAltitude;
-            playerGO.transform.position = Vector3.up * spawnDist;
-            playerGO.transform.up       = Vector3.up;
+            // Spawn à l'équateur (+X) pour valider l'alignement des blocs latéraux.
+            // Revenir à Vector3.up pour le spawn normal au pôle nord.
+            Vector3 spawnDir = Vector3.right;
+            playerGO.transform.position = spawnDir * spawnDist;
+            playerGO.transform.up       = spawnDir;
 
             // Capsule collider
             var capsule = playerGO.AddComponent<CapsuleCollider>();
