@@ -30,6 +30,7 @@ namespace AstroVoxel.Player
         [Header("Références")]
         [SerializeField] private Camera playerCamera;
         [SerializeField] private PlanetWorld world;
+        [SerializeField] private Rigidbody playerRigidbody;
 
         // ── Visualisation (preview du bloc sélectionné) ───────
         [Header("Highlight (optionnel)")]
@@ -85,16 +86,73 @@ namespace AstroVoxel.Player
             if (!Raycast(out RaycastHit hit)) return;
             Vector3 pos = hit.point + hit.normal * 0.5f;
 
+            bool placed = false;
+
             // Astéroïde
             var ast = hit.collider?.GetComponentInParent<AstroVoxel.Space.AsteroidWorld>();
-            if (ast != null) { ast.PlaceBlock(pos, blockToPlace); return; }
+            if (ast != null)
+            {
+                placed = ast.PlaceBlock(pos, blockToPlace);
+            }
+            else
+            {
+                // Planète infinie (PlanetWorld créé dynamiquement par InfinitePlanetSystem)
+                var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
+                if (pw != null)
+                    placed = pw.PlaceBlock(pos, blockToPlace);
+                else if (world != null)
+                    placed = world.PlaceBlock(pos, blockToPlace);
+            }
 
-            // Planète infinie (PlanetWorld créé dynamiquement par InfinitePlanetSystem)
-            var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
-            if (pw != null) { pw.PlaceBlock(pos, blockToPlace); return; }
+            // Empêche le joueur de tomber dans le vide quand il pose un bloc sous ses pieds
+            if (placed)
+                ResolveBlockPlacementOverlap(hit);
+        }
 
-            // Planète de base
-            world?.PlaceBlock(pos, blockToPlace);
+        /// <summary>
+        /// Après avoir posé un bloc, vérifie si la capsule du joueur chevauche le bloc
+        /// placé et pousse le joueur vers le haut pour l'en dégager.
+        /// Évite que le moteur physique résolve le chevauchement lateralement ou vers le bas.
+        /// </summary>
+        private void ResolveBlockPlacementOverlap(RaycastHit hit)
+        {
+            if (playerRigidbody == null) return;
+
+            var capsule = playerRigidbody.GetComponent<CapsuleCollider>();
+            if (capsule == null) return;
+
+            Transform pt      = playerRigidbody.transform;
+            Vector3   up      = pt.up;  // radial haut de la planète
+
+            // Sommet du bloc placé en world-space, projeté sur l'axe "up" du joueur.
+            // hit.point est sur la face de l'ancien bloc ; +hit.normal*1 = sommet du nouveau.
+            float blockTopH = Vector3.Dot(hit.point + hit.normal, up);
+
+            // Pied de la capsule en world-space (le pivot du joueur est aux pieds).
+            // capsule.center.y = playerHeight/2, height = playerHeight
+            // → le bas de la capsule est au pivot (Y local = 0).
+            float feetH = Vector3.Dot(pt.position, up);
+
+            float overlap = blockTopH - feetH;
+            if (overlap <= 0.001f) return;  // bloc en dessous ou au ras des pieds, OK
+
+            // Vérifie que le bloc est horizontalement sous la capsule (pas sur le côté).
+            Vector3 horizOffset = (hit.point + hit.normal * 0.5f) - pt.position;
+            horizOffset -= Vector3.Dot(horizOffset, up) * up;
+            if (horizOffset.magnitude > capsule.radius + 0.7f) return;
+
+            // Limite de sécurité : ne téléporte pas de plus d'un bloc.
+            if (overlap > 1.5f) return;
+
+            // Pousse le joueur vers le haut pour dégager l'overlap.
+            playerRigidbody.position += up * overlap;
+
+            // Annule la composante descendante de la vélocité pour éviter
+            // que le joueur rebondit immédiatement dans le bloc.
+            Vector3 vel        = playerRigidbody.linearVelocity;
+            float   downSpeed  = Vector3.Dot(vel, -up);
+            if (downSpeed > 0f)
+                playerRigidbody.linearVelocity += up * downSpeed;
         }
 
         // ── Raycast ───────────────────────────────────────────
@@ -255,10 +313,11 @@ namespace AstroVoxel.Player
         }
 
         /// <summary>Assigne les références depuis GameBootstrap.</summary>
-        public void Init(Camera cam, PlanetWorld w)
+        public void Init(Camera cam, PlanetWorld w, Rigidbody rb = null)
         {
-            playerCamera = cam;
-            world        = w;
+            playerCamera    = cam;
+            world           = w;
+            playerRigidbody = rb;
         }
 
         /// <summary>Assigne le cube de sélection 3D créé par GameBootstrap.</summary>

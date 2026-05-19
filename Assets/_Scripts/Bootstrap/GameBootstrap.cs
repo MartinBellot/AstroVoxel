@@ -210,7 +210,7 @@ namespace AstroVoxel.Bootstrap
 
             // BlockInteraction
             var blockInteract = playerGO.AddComponent<BlockInteraction>();
-            blockInteract.Init(playerCam, world);
+            blockInteract.Init(playerCam, world, rb);
 
             // Câblage final
             controller.SetCamera(cameraGO.transform);
