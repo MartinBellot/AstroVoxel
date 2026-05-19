@@ -281,7 +281,7 @@ namespace AstroVoxel.Player
             cntTxt.font      = GetFont(10);
             cntTxt.fontSize  = 10;
             cntTxt.color     = _textCount;
-            cntTxt.alignment = TextAnchor.LowerRight;
+            cntTxt.alignment = TextAnchor.UpperRight;
             cntTxt.raycastTarget = false;
 
             // Hover

@@ -44,9 +44,11 @@ namespace AstroVoxel.Player
         private Image[]    _slotRim;
         private RawImage[] _slotIcon;
         private Color[]    _slotIconTint;   // teinte biome (vert herbe, feuillages…)
+        private Text[]     _slotCount;      // compteur survie (haut-droite de chaque slot)
         private int        _visibleIndex = -1;
         private Material[]      _materials;
-        private BlockType[]     _hotbarCache   = new BlockType[9];
+        private BlockType[]     _hotbarCache      = new BlockType[9];
+        private int[]           _hotbarCountCache = new int[9];
         private RectTransform[] _hotbarSlotRTs;
 
         private Text   _blockLabel;
@@ -200,6 +202,22 @@ namespace AstroVoxel.Player
                 }
             }
 
+            // Mettre à jour les compteurs survie
+            if (GameModeManager.IsSurvival && _slotCount != null)
+            {
+                var survHotbar = SurvivalInventoryData.Instance.Hotbar;
+                for (int i = 0; i < 9 && i < _slotCount.Length; i++)
+                {
+                    if (_slotCount[i] == null) continue;
+                    int cnt = (!survHotbar[i].IsEmpty) ? survHotbar[i].count : 0;
+                    if (cnt != _hotbarCountCache[i])
+                    {
+                        _hotbarCountCache[i] = cnt;
+                        _slotCount[i].text   = cnt > 1 ? cnt.ToString() : "";
+                    }
+                }
+            }
+
             int idx = _blockInteract.HotbarIndex;
             if (idx == _visibleIndex) return;
 
@@ -322,6 +340,15 @@ namespace AstroVoxel.Player
                 _healthBarRoot.SetActive(mode == GameMode.Survival);
             if (_miningBarRoot != null)
                 _miningBarRoot.SetActive(false); // cache la barre immédiatement
+            // Effacer les compteurs de la hotbar si on revient en créatif
+            if (mode != GameMode.Survival && _slotCount != null)
+            {
+                for (int i = 0; i < _slotCount.Length; i++)
+                {
+                    if (_slotCount[i] != null) _slotCount[i].text = "";
+                    _hotbarCountCache[i] = 0;
+                }
+            }
         }
 
         // ─────────────────────────────────────────────────────
@@ -434,6 +461,7 @@ namespace AstroVoxel.Player
             _slotRim       = new Image[count];
             _slotIcon      = new RawImage[count];
             _slotIconTint  = new Color[count];
+            _slotCount     = new Text[count];
             _hotbarSlotRTs = new RectTransform[count];
 
             float startX = -(totalW * 0.5f) + padding + slotSize * 0.5f;
@@ -487,6 +515,24 @@ namespace AstroVoxel.Player
                 numTxt.color     = _textSecondary;
                 numTxt.alignment = TextAnchor.MiddleCenter;
                 numTxt.font      = GetFont(10);
+
+                // Compteur d'items (haut-droite, visible en survie uniquement)
+                var cntGO = new GameObject($"Slot_Count_{i}");
+                cntGO.transform.SetParent(hotbarRoot, false);
+                var cntRT = cntGO.AddComponent<RectTransform>();
+                cntRT.anchorMin        = new Vector2(0.5f, 0.5f);
+                cntRT.anchorMax        = new Vector2(0.5f, 0.5f);
+                cntRT.pivot            = new Vector2(1f, 1f);
+                cntRT.sizeDelta        = new Vector2(slotSize - 10f, 14f);
+                cntRT.anchoredPosition = new Vector2(xPos + slotSize * 0.5f - 3f, slotSize * 0.5f - 3f);
+                var cntTxt = cntGO.AddComponent<Text>();
+                cntTxt.text          = "";
+                cntTxt.fontSize      = 10;
+                cntTxt.color         = new Color(1f, 0.85f, 0.30f, 1f);
+                cntTxt.alignment     = TextAnchor.UpperRight;
+                cntTxt.font          = GetFont(10);
+                cntTxt.raycastTarget = false;
+                _slotCount[i]        = cntTxt;
             }
 
             // Initialise la sélection visuelle immédiatement
