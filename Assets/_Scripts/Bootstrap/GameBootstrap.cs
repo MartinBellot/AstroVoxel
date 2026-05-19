@@ -52,6 +52,9 @@ namespace AstroVoxel.Bootstrap
             // Vaisseau spatial (spawn au sol, à côté du joueur)
             BuildSpaceShip(playerBody, playerCam, world);
 
+            // Système d'astéroïdes et météorites
+            BuildAsteroidSystem(playerBody, builtMaterials, sunOrbit);
+
             world.SetViewer(playerBody);
 
             // Force le chargement synchrone des chunks AVANT que la physique ne simule
@@ -419,6 +422,24 @@ namespace AstroVoxel.Bootstrap
             var mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
             mat.color = color;
             return mat;
+        }
+
+        // ── Système d'astéroïdes ──────────────────────────────
+
+        private static void BuildAsteroidSystem(
+            Transform  player,
+            Material[] blockMaterials,
+            SunOrbit sunOrbit)
+        {
+            var go = new GameObject("AsteroidSystem");
+            var mgr = go.AddComponent<AstroVoxel.Space.AsteroidSystemManager>();
+
+            // Position du soleil : direction × rayon orbital
+            Vector3 sunPos = sunOrbit != null
+                ? sunOrbit.SunDirection * 800f
+                : Vector3.right * 800f;
+
+            mgr.Init(player, blockMaterials, sunPos);
         }
     }
 }

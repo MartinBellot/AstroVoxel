@@ -20,8 +20,34 @@ namespace AstroVoxel.Physics
                  "(hauteur de saut 1.252 bloc, apex à 0.43 s).")]
         [SerializeField] private float gravityForce = 13.54f;
 
+        [Tooltip("Rayon d'influence en unités. 0 = infini (planète). > 0 = astéroïde.")]
+        [SerializeField, Range(0f, 500f)] private float influenceRadius = 0f;
+
         /// <summary>Accélération gravitationnelle (lecture publique).</summary>
         public float GravityForce => gravityForce;
+
+        /// <summary>
+        /// Rayon d'influence de cet attracteur.
+        /// 0 = attracteur planétaire (portée infinie).
+        /// &gt; 0 = attracteur d'astéroïde (portée limitée).
+        /// </summary>
+        public float InfluenceRadius => influenceRadius;
+
+        /// <summary>
+        /// Vitesse orbitale du corps porteur (définie par <see cref="AstroVoxel.Space.AsteroidOrbit"/>).
+        /// Peut être utilisée pour calculer le déplacement relatif joueur/astéroïde.
+        /// </summary>
+        public Vector3 OrbitalVelocity { get; set; }
+
+        /// <summary>
+        /// Configure cet attracteur pour un astéroïde (force et portée réduites).
+        /// Appelé par <see cref="AstroVoxel.Space.AsteroidField"/>.
+        /// </summary>
+        public void SetAsteroidParams(float force, float influence)
+        {
+            gravityForce    = force;
+            influenceRadius = influence;
+        }
 
         /// <summary>
         /// Applique une force d'attraction vers le centre de cet objet

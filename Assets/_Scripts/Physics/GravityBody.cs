@@ -35,6 +35,14 @@ namespace AstroVoxel.Physics
         private Rigidbody  _rb;
         private OzoneLayer _ozoneLayer;
 
+        // ── Multi-attracteur ──────────────────────────────────
+
+        /// <summary>Meilleur attracteur actif (planète ou astéroïde proche).</summary>
+        private GravityAttractor _activeAttractor;
+        private GravityAttractor[] _allAttractors = new GravityAttractor[0];
+        private float _attractorRefreshTimer = 0f;
+        private const float AttractorRefreshInterval = 5f;
+
         // ── État physique ─────────────────────────────────────
 
         /// <summary>
@@ -79,11 +87,23 @@ namespace AstroVoxel.Physics
 
             // Récupère la couche d'ozone (facultative : si absente, toujours en atmosphère).
             _ozoneLayer = FindAnyObjectByType<OzoneLayer>();
+
+            // Initialise la liste des attracteurs
+            _allAttractors = FindObjectsByType<GravityAttractor>();
+            _activeAttractor = attractor;
         }
 
         private void FixedUpdate()
         {
             if (attractor == null) return;
+
+            // ── Rafraîchit la liste des attracteurs périodiquement ─
+            _attractorRefreshTimer -= Time.fixedDeltaTime;
+            if (_attractorRefreshTimer <= 0f)
+            {
+                _attractorRefreshTimer = AttractorRefreshInterval;
+                _allAttractors = FindObjectsByType<GravityAttractor>();
+            }
 
             // ── Détecte les transitions atmosphère ↔ espace ───
             bool nowInAtmosphere = _ozoneLayer == null
@@ -95,14 +115,18 @@ namespace AstroVoxel.Physics
                 OnAtmosphereChanged(_inAtmosphere);
             }
 
-            // ── Physique spatiale : inertie pure ───────────────
-            if (!_inAtmosphere) return;
+            // ── Sélectionne le meilleur attracteur ────────────
+            _activeAttractor = FindBestAttractor();
 
-            // ── Physique planétaire ────────────────────────────
-            // 1. Applique la force d'attraction.
-            attractor.Attract(_rb);
+            if (_activeAttractor == null) return;
 
-            // 2. Aligne doucement transform.up vers le "haut" planétaire (= opposé de la gravité).
+            // ── Physique spatiale : inertie pure sauf astéroïde proche ─
+            if (!_inAtmosphere && _activeAttractor.InfluenceRadius <= 0f) return;
+
+            // ── Applique la gravité du meilleur attracteur ────
+            _activeAttractor.Attract(_rb);
+
+            // ── Aligne doucement transform.up vers le "haut" de l'attracteur actif ─
             AlignUpToPlanetSurface();
         }
 
@@ -135,10 +159,42 @@ namespace AstroVoxel.Physics
         /// à l'opposé du centre de la planète, simulant le "sol sous les pieds".
         /// Interpolation sphérique limitée par <see cref="alignmentSpeed"/>.
         /// </summary>
+        /// <summary>
+        /// Renvoie l'attracteur le plus pertinent :
+        ///  - Dans l'atmosphère → attracteur planétaire (InfluenceRadius == 0).
+        ///  - Dans l'espace → attracteur d'astéroïde le plus proche dans sa portée.
+        /// </summary>
+        private GravityAttractor FindBestAttractor()
+        {
+            if (_inAtmosphere)
+            {
+                // Retourne le premier attracteur planétaire (portée infinie)
+                foreach (var a in _allAttractors)
+                    if (a != null && a.InfluenceRadius <= 0f) return a;
+                return attractor;
+            }
+
+            // En espace : cherche l'astéroïde le plus proche dans sa zone d'influence
+            GravityAttractor best = null;
+            float bestDist = float.MaxValue;
+            foreach (var a in _allAttractors)
+            {
+                if (a == null || a.InfluenceRadius <= 0f) continue;
+                float dist = Vector3.Distance(_rb.position, a.transform.position);
+                if (dist <= a.InfluenceRadius && dist < bestDist)
+                {
+                    best     = a;
+                    bestDist = dist;
+                }
+            }
+            return best;  // peut être null → inertie pure
+        }
+
         private void AlignUpToPlanetSurface()
         {
-            // Direction "vers le haut" depuis la surface de la planète.
-            Vector3 planetUp = (_rb.position - attractor.transform.position).normalized;
+            GravityAttractor target = _activeAttractor != null ? _activeAttractor : attractor;
+            // Direction "vers le haut" depuis la surface du corps attracteur.
+            Vector3 planetUp = (_rb.position - target.transform.position).normalized;
 
             // Rotation cible : aligne l'axe Y local sur planetUp, conserve l'orientation X/Z.
             Quaternion targetRotation = Quaternion.FromToRotation(transform.up, planetUp) * transform.rotation;

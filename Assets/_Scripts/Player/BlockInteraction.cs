@@ -66,14 +66,19 @@ namespace AstroVoxel.Player
         private void TryBreakBlock()
         {
             if (!Raycast(out RaycastHit hit)) return;
-            world.BreakBlock(hit.point - hit.normal * 0.5f);
+            Vector3 pos = hit.point - hit.normal * 0.5f;
+            var ast = hit.collider?.GetComponentInParent<AstroVoxel.Space.AsteroidWorld>();
+            if (ast != null) ast.BreakBlock(pos);
+            else world?.BreakBlock(pos);
         }
 
         private void TryPlaceBlock()
         {
             if (!Raycast(out RaycastHit hit)) return;
-            // Place légèrement au-dessus de la face touchée
-            world.PlaceBlock(hit.point + hit.normal * 0.5f, blockToPlace);
+            Vector3 pos = hit.point + hit.normal * 0.5f;
+            var ast = hit.collider?.GetComponentInParent<AstroVoxel.Space.AsteroidWorld>();
+            if (ast != null) ast.PlaceBlock(pos, blockToPlace);
+            else world?.PlaceBlock(pos, blockToPlace);
         }
 
         // ── Raycast ───────────────────────────────────────────

@@ -55,7 +55,7 @@ namespace AstroVoxel.Player
             transform.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
 
             if (playerBody != null && mouseX != 0f)
-                playerBody.Rotate(playerBody.up, mouseX, Space.World);
+                playerBody.Rotate(playerBody.up, mouseX, UnityEngine.Space.World);
         }
 
         // ── Abstraction Input ─────────────────────────────────

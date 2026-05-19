@@ -22,6 +22,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using AstroVoxel.VoxelEngine;
+using AstroVoxel.Vehicle;
 
 namespace AstroVoxel.Player
 {
@@ -108,6 +109,9 @@ namespace AstroVoxel.Player
             // Ignore le E quand la barre de recherche a le focus,
             // sinon l'utilisateur ne peut jamais taper la lettre 'e'.
             if (toggleE && IsSearchFocused()) toggleE = false;
+
+            // Ignore le E quand le joueur pilote un vaisseau (E = roulis droite)
+            if (toggleE && SpaceShipController.IsAnyShipPiloted) toggleE = false;
 
             if (toggleE)
             {

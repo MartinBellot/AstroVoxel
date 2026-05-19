@@ -24,7 +24,7 @@ namespace AstroVoxel.VoxelEngine
     /// Gère la grille de chunks orientés (18-Face Cube-Sphère Octaédrique).
     /// Expose l'API de lecture/écriture de blocs en world-space.
     /// </summary>
-    public sealed class PlanetWorld : MonoBehaviour
+    public sealed class PlanetWorld : MonoBehaviour, IVoxelWorld
     {
         // ── Inspector ─────────────────────────────────────────
         [Header("Planète")]
@@ -43,6 +43,9 @@ namespace AstroVoxel.VoxelEngine
         // ── API publique ──────────────────────────────────────
 
         public Vector3 PlanetCenter => transform.position;
+
+        // IVoxelWorld
+        public Vector3 WorldCenter   => transform.position;
 
         public void SetViewer(Transform viewer) => _viewer = viewer;
 

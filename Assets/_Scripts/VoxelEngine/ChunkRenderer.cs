@@ -41,10 +41,10 @@ namespace AstroVoxel.VoxelEngine
         // ── Mode monde planétaire ─────────────────────────────
         private Vector3    _planetCenter;
         private Material[] _blockMaterials;   // index = (byte)BlockType
-        private PlanetWorld _world;           // référence pour la lookup des voisins réels
+        private IVoxelWorld _world;           // référence pour la lookup des voisins réels
         private Quaternion _chunkRotation;    // rotation de ce chunk (local +Y = radial sortant)
         private FaceIndex  _chunkFace;        // face canonique (masque de génération)
-
+        private System.Func<Vector3, byte> _oobBlockProvider;  // fournisseur de blocs hors-chunk        private bool       _useRadialOrientation = true;       // false pour astéroïdes (chunks cubiques)
         // ── Inspector (mode plat standalone) ─────────────────
         [Header("Génération du terrain (mode standalone)")]
         [Tooltip("Nombre de couches solides depuis le bas du Chunk.")]
@@ -100,13 +100,15 @@ namespace AstroVoxel.VoxelEngine
         /// Initialise ce chunk en mode planétaire (18-Face Cube-Sphère Octaédrique).
         /// Appelé par <see cref="PlanetWorld"/> juste après AddComponent.
         /// </summary>
-        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter, PlanetWorld world, Quaternion chunkRotation, FaceIndex chunkFace, Material[] blockMaterials = null)
+        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter, IVoxelWorld world, Quaternion chunkRotation, FaceIndex chunkFace, Material[] blockMaterials = null, System.Func<Vector3, byte> oobProvider = null, ChunkData preGeneratedData = null, bool useRadialOrientation = true)
         {
             _planetCenter   = planetCenter;
             _blockMaterials = blockMaterials;
             _world          = world;
             _chunkRotation  = chunkRotation;
             _chunkFace      = chunkFace;
+            _oobBlockProvider = oobProvider ?? (pos => (byte)PlanetChunkGenerator.GetBlockType(pos, _planetCenter));
+            _useRadialOrientation = useRadialOrientation;
 
             // Awake peut ne pas encore avoir été appelé si AddComponent vient de se faire
             if (_mesh == null)
@@ -123,8 +125,15 @@ namespace AstroVoxel.VoxelEngine
                 }
             }
 
-            _chunkData = new ChunkData();
-            PlanetChunkGenerator.Generate(_chunkData, worldOrigin, _planetCenter, _chunkRotation, _chunkFace);
+            if (preGeneratedData != null)
+            {
+                _chunkData = preGeneratedData;
+            }
+            else
+            {
+                _chunkData = new ChunkData();
+                PlanetChunkGenerator.Generate(_chunkData, worldOrigin, _planetCenter, _chunkRotation, _chunkFace);
+            }
 
             RebuildMesh();
         }
@@ -153,8 +162,10 @@ namespace AstroVoxel.VoxelEngine
                 }
             }
 
-            // Chunk voisin non chargé → repli sur le générateur
-            return PlanetChunkGenerator.GetBlockType(worldPos, _planetCenter);
+            // Chunk voisin non chargé → repli sur le fournisseur OOB
+            return _oobBlockProvider != null
+                ? _oobBlockProvider(worldPos)
+                : (byte)PlanetChunkGenerator.GetBlockType(worldPos, _planetCenter);
         }
 
         /// <summary>
@@ -195,11 +206,14 @@ namespace AstroVoxel.VoxelEngine
             // l'extérieur, indépendamment de la face cube-sphère du chunk.
             if (_world != null)
             {
+                // Utilise le centre courant du monde (dynamique pour les astéroïdes en orbite)
+                // plutôt que _planetCenter qui est fixé à l'initialisation.
+                Vector3 currentCenter = _world.WorldCenter;
                 ChunkMeshBuilder.Build(_chunkData, _meshData, GetNeighbourForMesh,
-                    useRadialOrientation: true,
+                    useRadialOrientation: _useRadialOrientation,
                     chunkRotation:        _chunkRotation,
                     chunkOriginWorld:     transform.position,
-                    planetCenter:         _planetCenter);
+                    planetCenter:         currentCenter);
             }
             else
             {
@@ -222,7 +236,8 @@ namespace AstroVoxel.VoxelEngine
             _mesh.SetUVs(0, _meshData.UVs);
             _mesh.RecalculateNormals();
             _mesh.RecalculateBounds();
-            _mesh.Optimize();
+            // _mesh.Optimize() retiré : très coûteux et appelé à chaque rebuild (placement/destruction de blocs).
+            // Doit être invoqué manuellement une seule fois sur un mesh final/statique.
 
             _meshFilter.sharedMesh = _mesh;
 
