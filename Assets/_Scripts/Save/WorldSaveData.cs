@@ -35,6 +35,9 @@ namespace AstroVoxel.Save
         public float playerPosX, playerPosY, playerPosZ;
         public float playerRotX, playerRotY, playerRotZ, playerRotW;
 
+        // ── Vaisseau(x) ──────────────────────────────────────────
+        public List<ShipSaveEntry> ships = new List<ShipSaveEntry>();
+
         // ── Planète de départ ─────────────────────────────────
         public List<PlanetBlockMod> homePlanetMods = new List<PlanetBlockMod>();
 
@@ -89,7 +92,21 @@ namespace AstroVoxel.Save
     }
 
     // ── Astéroïde ─────────────────────────────────────────────
+    /// <summary>
+    /// Position et orientation sauvegardées d'un vaisseau.
+    /// Identifié par <see cref="shipId"/> (auto-incrémenté par
+    /// <see cref="AstroVoxel.Vehicle.SpaceShipController"/>).
+    /// </summary>
+    [Serializable]
+    public sealed class ShipSaveEntry
+    {
+        /// <summary>ID unique du vaisseau dans la session (0, 1, 2…).</summary>
+        public int   shipId;
+        public float posX, posY, posZ;
+        public float rotX, rotY, rotZ, rotW;
+    }
 
+    // ── Astéroïde ──────────────────────────────────────────────
     /// <summary>
     /// Un seul bloc modifié sur un astéroïde (grille cubique axis-aligned locale).
     /// (cx, cy, cz) = coord du chunk en unités de chunk ; (lx, ly, lz) = local dans le chunk.

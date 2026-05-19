@@ -144,6 +144,18 @@ namespace AstroVoxel.Vehicle
         /// <summary>Vrai si n'importe quel vaisseau est en cours de pilotage (partagé entre toutes les instances).</summary>
         public static bool IsAnyShipPiloted { get; private set; }
 
+        /// <summary>
+        /// Identifiant unique de ce vaisseau dans la session courante (0, 1, 2…).
+        /// Assigné une fois dans Awake via <see cref="_nextShipId"/>.
+        /// Appeler <see cref="ResetIdCounter"/> avant de créer les vaisseaux au démarrage
+        /// de scène pour garantir la cohérence avec les données de sauvegarde.
+        /// </summary>
+        public int ShipId { get; private set; }
+        private static int _nextShipId = 0;
+
+        /// <summary>Remet le compteur d'ID à zéro. Appelé par GameBootstrap avant la création des vaisseaux.</summary>
+        public static void ResetIdCounter() => _nextShipId = 0;
+
         /// <summary>Vitesse scalaire en unités/s.</summary>
         public float Speed => _rb != null ? _rb.linearVelocity.magnitude : 0f;
 
@@ -166,6 +178,8 @@ namespace AstroVoxel.Vehicle
 
         private void Awake()
         {
+            ShipId = _nextShipId++;
+
             _rb = GetComponent<Rigidbody>();
             _rb.useGravity         = false;
             _rb.freezeRotation     = false;   // rotation gérée via angularVelocity

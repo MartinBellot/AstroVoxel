@@ -27,6 +27,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using AstroVoxel.VoxelEngine;
 using AstroVoxel.Space;
+using AstroVoxel.Vehicle;
 
 namespace AstroVoxel.Save
 {
@@ -173,6 +174,23 @@ namespace AstroVoxel.Save
             if (_infinitePlanetSystem != null)
                 data.infinitePlanetMods = _infinitePlanetSystem.CollectModifications();
 
+            // Vaisseau(x)
+            var ships = FindObjectsByType<SpaceShipController>(FindObjectsInactive.Include);
+            foreach (var ship in ships)
+            {
+                data.ships.Add(new ShipSaveEntry
+                {
+                    shipId = ship.ShipId,
+                    posX   = ship.transform.position.x,
+                    posY   = ship.transform.position.y,
+                    posZ   = ship.transform.position.z,
+                    rotX   = ship.transform.rotation.x,
+                    rotY   = ship.transform.rotation.y,
+                    rotZ   = ship.transform.rotation.z,
+                    rotW   = ship.transform.rotation.w,
+                });
+            }
+
             // Astéroïdes
             CollectAsteroidData(data);
 
@@ -253,22 +271,52 @@ namespace AstroVoxel.Save
             yield return null;
             yield return null;
 
-            if (_player == null) yield break;
-
-            var pos = new Vector3(data.playerPosX, data.playerPosY, data.playerPosZ);
-            var rot = new Quaternion(data.playerRotX, data.playerRotY, data.playerRotZ, data.playerRotW);
-
-            var rb = _player.GetComponent<Rigidbody>();
-            if (rb != null)
+            // Joueur
+            if (_player != null)
             {
-                rb.position         = pos;
-                rb.rotation         = rot;
-                rb.linearVelocity   = Vector3.zero;
-                rb.angularVelocity  = Vector3.zero;
+                var pos = new Vector3(data.playerPosX, data.playerPosY, data.playerPosZ);
+                var rot = new Quaternion(data.playerRotX, data.playerRotY, data.playerRotZ, data.playerRotW);
+
+                var rb = _player.GetComponent<Rigidbody>();
+                if (rb != null)
+                {
+                    rb.position        = pos;
+                    rb.rotation        = rot;
+                    rb.linearVelocity  = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                }
+                else
+                {
+                    _player.SetPositionAndRotation(pos, rot);
+                }
             }
-            else
+
+            // Vaisseau(x)
+            if (data.ships != null && data.ships.Count > 0)
             {
-                _player.SetPositionAndRotation(pos, rot);
+                // Table de lookup shipId → entrée
+                var shipLookup = new Dictionary<int, ShipSaveEntry>(data.ships.Count);
+                foreach (var e in data.ships) shipLookup[e.shipId] = e;
+
+                var allShips = FindObjectsByType<SpaceShipController>(FindObjectsInactive.Include);
+                foreach (var s in allShips)
+                {
+                    if (!shipLookup.TryGetValue(s.ShipId, out var e)) continue;
+                    var sPos = new Vector3(e.posX, e.posY, e.posZ);
+                    var sRot = new Quaternion(e.rotX, e.rotY, e.rotZ, e.rotW);
+                    var shipRb = s.GetComponent<Rigidbody>();
+                    if (shipRb != null)
+                    {
+                        shipRb.position        = sPos;
+                        shipRb.rotation        = sRot;
+                        shipRb.linearVelocity  = Vector3.zero;
+                        shipRb.angularVelocity = Vector3.zero;
+                    }
+                    else
+                    {
+                        s.transform.SetPositionAndRotation(sPos, sRot);
+                    }
+                }
             }
         }
 

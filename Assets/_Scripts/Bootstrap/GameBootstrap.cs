@@ -38,7 +38,13 @@ namespace AstroVoxel.Bootstrap
         private void Awake()
         {
             // ── Seed globale du monde ─────────────────────────
-            WorldSeedManager.Initialize();  // aléatoire au premier lancement, conservée après /restart
+            // Si une sauvegarde est en attente, la seed a déjà été forcée par SaveSystem.LoadWorld().
+            // Initialize() est idempotent : elle ne fait rien si IsInitialized=true.
+            if (AstroVoxel.Save.SaveSystem.PendingLoad == null)
+                WorldSeedManager.Initialize();  // aléatoire au premier lancement, conservée après /restart
+
+            // Remet le compteur d'ID vaisseau à zéro pour cohérence avec les sauvegardes.
+            AstroVoxel.Vehicle.SpaceShipController.ResetIdCounter();
 
             // ── Skybox spatiale ───────────────────────────────
             BuildEnvironment();
