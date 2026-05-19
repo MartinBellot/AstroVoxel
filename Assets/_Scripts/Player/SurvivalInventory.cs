@@ -60,6 +60,7 @@ namespace AstroVoxel.Player
 
         private BlockInteraction _blockInteract;
         private Material[]       _materials;
+        private Material[]       _itemMaterials;
 
         private GameObject    _overlay;
         private Transform     _itemGridContent;
@@ -72,10 +73,12 @@ namespace AstroVoxel.Player
             Canvas           canvas,
             BlockInteraction blockInteract,
             Material[]       materials,
-            RectTransform[]  hotbarSlotRects = null)
+            RectTransform[]  hotbarSlotRects = null,
+            Material[]       itemMaterials   = null)
         {
             _blockInteract = blockInteract;
             _materials     = materials;
+            _itemMaterials = itemMaterials;
             BuildUI(canvas);
             _overlay.SetActive(false);
 
@@ -263,9 +266,7 @@ namespace AstroVoxel.Player
             }
             else
             {
-                // Item outil : couleur unique selon le type
-                rawImg.color   = GetToolColor(stack.itemType);
-                rawImg.texture = MakeSolidTex(rawImg.color);
+                ApplyItemIcon(rawImg, stack.itemType);
             }
 
             // Compteur
@@ -349,8 +350,7 @@ namespace AstroVoxel.Player
             }
             else
             {
-                rawImg.color   = GetToolColor(recipe.ResultItem);
-                rawImg.texture = MakeSolidTex(rawImg.color);
+                ApplyItemIcon(rawImg, recipe.ResultItem);
             }
 
             // Nom + ingrédients
@@ -556,6 +556,24 @@ namespace AstroVoxel.Player
             t.SetPixel(0, 0, col);
             t.Apply();
             return t;
+        }
+
+        private void ApplyItemIcon(RawImage raw, ItemType itype)
+        {
+            int idx = (int)itype - 300;
+            if (_itemMaterials != null && idx >= 0 && idx < _itemMaterials.Length && _itemMaterials[idx] != null)
+            {
+                var mat = _itemMaterials[idx];
+                if (mat.mainTexture is Texture2D tex)
+                {
+                    raw.texture = tex;
+                    raw.color   = Color.white;
+                    return;
+                }
+            }
+            // Repli : couleur unie
+            raw.color   = GetToolColor(itype);
+            raw.texture = MakeSolidTex(raw.color);
         }
 
         private static Color GetToolColor(ItemType t)

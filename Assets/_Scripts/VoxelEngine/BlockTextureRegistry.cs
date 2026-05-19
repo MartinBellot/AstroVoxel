@@ -22,5 +22,9 @@ namespace AstroVoxel.VoxelEngine
         [Tooltip("256 matériaux indexés par renderingId (cast byte de BlockType). " +
                  "Généré automatiquement via AstroVoxel → Rebuild Block Texture Registry.")]
         public Material[] materials = new Material[256];
+
+        [Tooltip("Matériaux items (outils, bâton…) indexés par (ItemType - 300). " +
+                 "Généré automatiquement via AstroVoxel → Rebuild Block Texture Registry.")]
+        public Material[] itemMaterials = new Material[20];
     }
 }

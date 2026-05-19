@@ -13,13 +13,15 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 using AstroVoxel.VoxelEngine;
+using AstroVoxel.Player;
 
 namespace AstroVoxel.Editor
 {
     public static class BlockRegistryBuilder
     {
-        private const string TextureBasePath  = "Assets/textures/block";
-        private const string MaterialsFolder  = "Assets/Resources/BlockMaterials";
+        private const string TextureBasePath     = "Assets/textures/block";
+        private const string ItemTextureBasePath  = "Assets/textures/item";
+        private const string MaterialsFolder      = "Assets/Resources/BlockMaterials";
         private const string RegistryPath     = "Assets/Resources/BlockTextureRegistry.asset";
         // Shader custom — Unlit, fonctionne avec URP et Built-In RP.
         // Évite les problèmes d'initialisation des matériaux URP/Lit créés par code.
@@ -119,6 +121,42 @@ namespace AstroVoxel.Editor
                 updated++;
             }
 
+            // ── Matériaux des items (bâton, outils) ──────────────
+            var itemDefs = new (ItemType itype, string texName)[]
+            {
+                (ItemType.Stick,         "stick"),
+                (ItemType.WoodenPickaxe, "wooden_pickaxe"),
+                (ItemType.StonePickaxe,  "stone_pickaxe"),
+                (ItemType.IronPickaxe,   "iron_pickaxe"),
+                (ItemType.WoodenAxe,     "wooden_axe"),
+                (ItemType.StoneAxe,      "stone_axe"),
+                (ItemType.WoodenShovel,  "wooden_shovel"),
+                (ItemType.StoneShovel,   "stone_shovel"),
+            };
+            if (registry.itemMaterials == null || registry.itemMaterials.Length < 20)
+                registry.itemMaterials = new Material[20];
+            foreach (var (itype, texName) in itemDefs)
+            {
+                string texPath = $"{ItemTextureBasePath}/{texName}.png";
+                var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(texPath);
+                if (tex == null) { Debug.LogWarning($"[BlockRegistry] Item texture introuvable : {texPath}"); continue; }
+                string matName = $"Item_{(int)itype:000}_{texName}";
+                string matPath = $"{MaterialsFolder}/{matName}.mat";
+                var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+                if (mat == null)
+                {
+                    mat = new Material(shader) { name = matName };
+                    AssetDatabase.CreateAsset(mat, matPath);
+                }
+                mat.shader = shader;
+                mat.SetTexture("_BaseMap", tex);
+                mat.mainTexture = tex;
+                mat.color = Color.white;
+                registry.itemMaterials[(int)itype - 300] = mat;
+                EditorUtility.SetDirty(mat);
+                updated++;
+            }
+
             EditorUtility.SetDirty(registry);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -184,8 +222,8 @@ namespace AstroVoxel.Editor
             // Les plages 108-199 et >220 sont réservées et non utilisées.
             // Air (0) n'a pas de texture.
             if (rid == 0) return true;
-            if (rid > 107 && rid < 200) return true;
-            if (rid > 220) return true;
+            if (rid > 108 && rid < 200) return true;  // 108 = CraftingTable
+            if (rid > 222) return true;               // 221 = CraftingTableTop, 222 = CraftingTableFront
             return false;
         }
 

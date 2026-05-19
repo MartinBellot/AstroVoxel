@@ -33,7 +33,7 @@ namespace AstroVoxel.Player
 
         private void Update()
         {
-            if (CreativeInventory.IsOpen || GameConsole.IsOpen) return;
+            if (CreativeInventory.IsOpen || SurvivalInventory.IsOpen || GameConsole.IsOpen) return;
 
             if (!IsCursorLocked() && GetAnyMouseButtonDown())
                 LockCursor(true);

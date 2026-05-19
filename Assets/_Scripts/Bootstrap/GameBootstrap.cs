@@ -286,6 +286,12 @@ namespace AstroVoxel.Bootstrap
 
         // ── HUD ─────────────────────────────────────────────
 
+        private static Material[] LoadItemMaterials()
+        {
+            var registry = UnityEngine.Resources.Load<AstroVoxel.VoxelEngine.BlockTextureRegistry>("BlockTextureRegistry");
+            return (registry != null) ? registry.itemMaterials : null;
+        }
+
         private static void BuildHUD(BlockInteraction blockInteract, Transform playerBody, Material[] builtMaterials)
         {
             // EventSystem (indispensable pour InputField, ScrollRect, EventTrigger…)
@@ -316,7 +322,7 @@ namespace AstroVoxel.Bootstrap
             var survInvGO = new GameObject("SurvivalInventory");
             survInvGO.transform.SetParent(canvasGO.transform, false);
             var survInv = survInvGO.AddComponent<SurvivalInventory>();
-            survInv.Init(canvas, blockInteract, builtMaterials, hud.HotbarSlotRects);
+            survInv.Init(canvas, blockInteract, builtMaterials, hud.HotbarSlotRects, LoadItemMaterials());
 
             // Câblage BlockInteraction ↔ SurvivalInventory
             blockInteract.InitSurvival(survInv, builtMaterials);
