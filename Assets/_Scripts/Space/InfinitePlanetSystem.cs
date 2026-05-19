@@ -21,6 +21,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using AstroVoxel.Save;
 using AstroVoxel.VoxelEngine;
 using AstroVoxel.Physics;
 using AstroVoxel.Environment;
@@ -96,7 +97,10 @@ namespace AstroVoxel.Space
         private GameObject  _activeGO;
         private PlanetWorld _activeWorld;
         private Coroutine   _loadCoroutine;
-
+        // Buffer de modifications planètes infinies (save/load).
+        // Persiste entre les sessions d'activation/désactivation.
+        private readonly Dictionary<int, List<PlanetBlockMod>> _pendingPlanetMods
+            = new Dictionary<int, List<PlanetBlockMod>>();
         // ── Références ────────────────────────────────────────
 
         private Transform  _player;
@@ -362,17 +366,39 @@ namespace AstroVoxel.Space
 
             _activeWorld.SetViewer(_player);
 
-            // Chargement async pour éviter le freeze
-            _loadCoroutine = _activeWorld.StartCoroutine(_activeWorld.LoadChunksAsync(AsyncChunksPerFrame));
+            // Chargement async pour éviter le freeze + application des mods en attente
+            _loadCoroutine = StartCoroutine(LoadPlanetAndApplyMods(index));
+        }
+
+        private IEnumerator LoadPlanetAndApplyMods(int index)
+        {
+            // Attendre la fin du chargement async (coroutine sur le PlanetWorld)
+            yield return _activeWorld.StartCoroutine(_activeWorld.LoadChunksAsync(AsyncChunksPerFrame));
+
+            // Appliquer les modifications en attente si elles existent
+            if (_activeWorld != null
+                && _pendingPlanetMods.TryGetValue(index, out var mods)
+                && mods.Count > 0)
+            {
+                _activeWorld.ApplyModifications(mods);
+            }
         }
 
         private void DeactivateVoxelPlanet()
         {
             if (_loadCoroutine != null)
             {
-                if (_activeWorld != null)
-                    _activeWorld.StopCoroutine(_loadCoroutine);
+                // La coroutine tourne sur 'this' (pas sur _activeWorld)
+                StopCoroutine(_loadCoroutine);
                 _loadCoroutine = null;
+            }
+
+            // Sauvegarder les modifications avant de détruire le monde
+            if (_activeWorld != null)
+            {
+                var mods = _activeWorld.GetModifications();
+                if (mods.Count > 0)
+                    _pendingPlanetMods[_activeIndex] = mods;
             }
 
             if (_activeGO != null)
@@ -456,6 +482,46 @@ namespace AstroVoxel.Space
                 if (mat.HasProperty("_Color"))    mat.SetColor("_Color", tint);
                 if (mat.HasProperty("_RimColor")) mat.SetColor("_RimColor", Color.Lerp(c, Color.white, 0.6f));
                 _impostorMaterials[i] = mat;
+            }
+        }
+
+        // ── Save / Load (pour SaveSystem) ─────────────────────
+
+        /// <summary>
+        /// Collecte toutes les modifications planètes infinies (planète active + buffer).
+        /// Appelé par <see cref="AstroVoxel.Save.SaveSystem"/> lors d'une sauvegarde.
+        /// </summary>
+        public List<InfinitePlanetModEntry> CollectModifications()
+        {
+            // Mettre à jour le buffer avec les mods de la planète active
+            if (_activeWorld != null && _activeIndex >= 0)
+            {
+                var activeMods = _activeWorld.GetModifications();
+                if (activeMods.Count > 0)
+                    _pendingPlanetMods[_activeIndex] = activeMods;
+            }
+
+            var result = new List<InfinitePlanetModEntry>();
+            foreach (var kv in _pendingPlanetMods)
+            {
+                if (kv.Value != null && kv.Value.Count > 0)
+                    result.Add(new InfinitePlanetModEntry { planetIndex = kv.Key, mods = kv.Value });
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Charge les modifications en attente depuis une sauvegarde.
+        /// Appelé par <see cref="AstroVoxel.Save.SaveSystem"/> lors du chargement.
+        /// Les mods seront appliquées après le prochain LoadChunksAsync.
+        /// </summary>
+        public void LoadPendingMods(List<InfinitePlanetModEntry> entries)
+        {
+            if (entries == null) return;
+            foreach (var entry in entries)
+            {
+                if (entry?.mods != null && entry.mods.Count > 0)
+                    _pendingPlanetMods[entry.planetIndex] = entry.mods;
             }
         }
 

@@ -63,6 +63,19 @@ namespace AstroVoxel.Space
         /// </summary>
         public Vector3 OrbitalVelocity { get; private set; }
 
+        /// <summary>Angle orbital courant en degrés. Utilisé par le système de sauvegarde.</summary>
+        public float CurrentAngle => _angle;
+
+        /// <summary>
+        /// Force l'angle orbital courant (restauration de sauvegarde).
+        /// Peut être appelé avant ou après <c>Start()</c>.
+        /// </summary>
+        public void SetOrbitAngle(float angle)
+        {
+            orbitPhase = angle;
+            _angle     = angle;
+        }
+
         // ── Cycle de vie ──────────────────────────────────────
 
         private void Awake()

@@ -15,6 +15,7 @@
 
 using System.Collections.Generic;
 using UnityEngine;
+using AstroVoxel.Save;
 using AstroVoxel.VoxelEngine;
 using AstroVoxel.Physics;
 
@@ -41,6 +42,12 @@ namespace AstroVoxel.Space
         // ── État interne ──────────────────────────────────────
         private readonly Dictionary<Vector3Int, ChunkRenderer> _chunks
             = new Dictionary<Vector3Int, ChunkRenderer>();
+
+        // Clé packed = lx | (ly << 8) | (lz << 16)
+        // Ce dictionnaire persiste à travers UnloadChunks() pour que les modifications
+        // survivent aux cycles LOD unload/reload.
+        private readonly Dictionary<Vector3Int, Dictionary<int, byte>> _modifications
+            = new Dictionary<Vector3Int, Dictionary<int, byte>>();
 
         private bool _loaded = false;
         private Coroutine _loadCo;
@@ -90,6 +97,7 @@ namespace AstroVoxel.Space
             Vector3Int lb = WorldToLocalBlock(worldPos);
             if (!BlockProperties.IsSolid(cr.GetBlock(lb.x, lb.y, lb.z))) return false;
             cr.SetBlock(lb.x, lb.y, lb.z, BlockType.Air);
+            RecordModification(WorldToChunkCoord(worldPos), lb.x, lb.y, lb.z, (byte)BlockType.Air);
             RebuildNeighbourChunks(worldPos);
             return true;
         }
@@ -102,8 +110,100 @@ namespace AstroVoxel.Space
             Vector3Int lb = WorldToLocalBlock(worldPos);
             if (BlockProperties.IsSolid(cr.GetBlock(lb.x, lb.y, lb.z))) return false;
             cr.SetBlock(lb.x, lb.y, lb.z, type);
+            RecordModification(WorldToChunkCoord(worldPos), lb.x, lb.y, lb.z, (byte)type);
             RebuildNeighbourChunks(worldPos);
             return true;
+        }
+
+        // ── Suivi des modifications (pour save/load) ──────────
+
+        private void RecordModification(Vector3Int coord, int lx, int ly, int lz, byte block)
+        {
+            if (!_modifications.TryGetValue(coord, out var dict))
+            {
+                dict = new Dictionary<int, byte>();
+                _modifications[coord] = dict;
+            }
+            dict[lx | (ly << 8) | (lz << 16)] = block;
+        }
+
+        /// <summary>
+        /// Retourne la liste de toutes les modifications appliquées à cet astéroïde.
+        /// Retourne une liste vide si aucun bloc n'a été modifié.
+        /// </summary>
+        public List<AsteroidBlockMod> GetModifications()
+        {
+            var result = new List<AsteroidBlockMod>();
+            foreach (var kv in _modifications)
+            foreach (var bkv in kv.Value)
+            {
+                int packed = bkv.Key;
+                result.Add(new AsteroidBlockMod
+                {
+                    cx    = kv.Key.x,
+                    cy    = kv.Key.y,
+                    cz    = kv.Key.z,
+                    lx    = (byte)( packed        & 0xFF),
+                    ly    = (byte)((packed >>  8) & 0xFF),
+                    lz    = (byte)((packed >> 16) & 0xFF),
+                    block = bkv.Value,
+                });
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Enregistre des modifications issues d'une sauvegarde.
+        /// Si les chunks sont déjà chargés, applique immédiatement.
+        /// Sinon, les modifications seront appliquées à la fin du prochain LoadChunks().
+        /// </summary>
+        public void QueueModifications(List<AsteroidBlockMod> mods)
+        {
+            if (mods == null || mods.Count == 0) return;
+            foreach (var mod in mods)
+            {
+                var coord = new Vector3Int(mod.cx, mod.cy, mod.cz);
+                RecordModification(coord, mod.lx, mod.ly, mod.lz, mod.block);
+            }
+            if (_loaded) ApplyModificationsInternal();
+        }
+
+        /// <summary>
+        /// Applique les modifications enregistrées sur les chunks chargés.
+        /// Appelé automatiquement après chaque LoadChunks().
+        /// </summary>
+        private void ApplyModificationsInternal()
+        {
+            if (_modifications.Count == 0) return;
+
+            var dirtyChunks = new HashSet<Vector3Int>();
+
+            foreach (var kv in _modifications)
+            {
+                if (!_chunks.TryGetValue(kv.Key, out ChunkRenderer cr)) continue;
+                foreach (var bkv in kv.Value)
+                {
+                    int packed = bkv.Key;
+                    int lx = (packed        & 0xFF);
+                    int ly = ((packed >>  8) & 0xFF);
+                    int lz = ((packed >> 16) & 0xFF);
+                    cr.SetBlockSilent(lx, ly, lz, (BlockType)bkv.Value);
+                }
+                dirtyChunks.Add(kv.Key);
+            }
+
+            // Rebuild chunks modifiés + leurs voisins
+            var toRebuild = new HashSet<Vector3Int>(dirtyChunks);
+            foreach (var coord in dirtyChunks)
+                for (int f = 0; f < 6; f++)
+                    toRebuild.Add(coord + new Vector3Int(
+                        VoxelData.FaceChecks[f, 0],
+                        VoxelData.FaceChecks[f, 1],
+                        VoxelData.FaceChecks[f, 2]));
+
+            foreach (var coord in toRebuild)
+                if (_chunks.TryGetValue(coord, out ChunkRenderer cr))
+                    cr.RebuildMesh();
         }
 
         // ── Chargement / déchargement ─────────────────────────
@@ -170,6 +270,7 @@ namespace AstroVoxel.Space
 
             _loaded = true;
             _loadCo = null;
+            ApplyModificationsInternal();
         }
 
         /// <summary>

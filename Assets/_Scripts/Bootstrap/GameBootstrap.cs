@@ -7,6 +7,7 @@
 
 using UnityEngine;
 using UnityEngine.UI;
+using AstroVoxel.Save;
 using AstroVoxel.VoxelEngine;
 using AstroVoxel.Physics;
 using AstroVoxel.Player;
@@ -60,7 +61,7 @@ namespace AstroVoxel.Bootstrap
             BuildAsteroidSystem(playerBody, builtMaterials, sunOrbit);
 
             // Système de planètes infinies
-            BuildInfinitePlanets(playerBody, builtMaterials);
+            var infinitePlanetSys = BuildInfinitePlanets(playerBody, builtMaterials);
 
             world.SetViewer(playerBody);
 
@@ -68,6 +69,9 @@ namespace AstroVoxel.Bootstrap
             // le premier FixedUpdate, sinon le joueur traverse la planète.
             world.UpdateChunks();
             UnityEngine.Physics.SyncTransforms();
+
+            // Système de sauvegarde (appliquer une save en attente après synchro physique)
+            BuildSaveSystem(world, playerBody, infinitePlanetSys);
         }
 
         // ── Construction du soleil ──────────────────────────
@@ -459,11 +463,21 @@ namespace AstroVoxel.Bootstrap
 
         // ── Système de planètes infinies ──────────────────────
 
-        private static void BuildInfinitePlanets(Transform player, Material[] blockMaterials)
+        private static InfinitePlanetSystem BuildInfinitePlanets(Transform player, Material[] blockMaterials)
         {
             var go  = new GameObject("InfinitePlanetSystem");
             var sys = go.AddComponent<InfinitePlanetSystem>();
             sys.Init(player, blockMaterials);
+            return sys;
+        }
+
+        // ── Système de sauvegarde ───────────────────────
+
+        private static void BuildSaveSystem(PlanetWorld homePlanet, Transform player, InfinitePlanetSystem ips)
+        {
+            var go  = new GameObject("SaveSystem");
+            var sys = go.AddComponent<SaveSystem>();
+            sys.Init(homePlanet, player, ips);
         }
     }
 }

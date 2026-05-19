@@ -15,8 +15,9 @@
 // ============================================================
 
 using System.Collections;
-using System.Collections.Generic;   // Dictionary
+using System.Collections.Generic;
 using UnityEngine;
+using AstroVoxel.Save;
 using AstroVoxel.Space;
 
 namespace AstroVoxel.VoxelEngine
@@ -54,6 +55,10 @@ namespace AstroVoxel.VoxelEngine
 
         private Transform _viewer;          // non utilisé pour le spawning, gardé pour l'API
         private bool _planetLoaded = false; // évite de respawner tous les chunks à chaque frame
+
+        // Clé packed = lx | (ly << 8) | (lz << 16)
+        private readonly Dictionary<FaceChunkCoord, Dictionary<int, byte>> _modifications
+            = new Dictionary<FaceChunkCoord, Dictionary<int, byte>>();
 
         /// <summary>Vrai quand tous les chunks sont chargés.</summary>
         public bool IsFullyLoaded => _planetLoaded;
@@ -172,6 +177,7 @@ namespace AstroVoxel.VoxelEngine
             Vector3Int lb = WorldToLocalBlock(worldPos);
             if (!BlockProperties.IsSolid(cr.GetBlock(lb.x, lb.y, lb.z))) return false;
             cr.SetBlock(lb.x, lb.y, lb.z, BlockType.Air);
+            RecordModification(WorldToFaceChunk(worldPos), lb.x, lb.y, lb.z, (byte)BlockType.Air);
             RebuildNeighbourChunks(worldPos);
             return true;
         }
@@ -183,8 +189,95 @@ namespace AstroVoxel.VoxelEngine
             Vector3Int lb = WorldToLocalBlock(worldPos);
             if (BlockProperties.IsSolid(cr.GetBlock(lb.x, lb.y, lb.z))) return false;
             cr.SetBlock(lb.x, lb.y, lb.z, type);
+            RecordModification(WorldToFaceChunk(worldPos), lb.x, lb.y, lb.z, (byte)type);
             RebuildNeighbourChunks(worldPos);
             return true;
+        }
+
+        // ── Suivi des modifications (pour save/load) ──────────
+
+        private void RecordModification(FaceChunkCoord coord, int lx, int ly, int lz, byte block)
+        {
+            if (!_modifications.TryGetValue(coord, out var dict))
+            {
+                dict = new Dictionary<int, byte>();
+                _modifications[coord] = dict;
+            }
+            dict[lx | (ly << 8) | (lz << 16)] = block;
+        }
+
+        /// <summary>
+        /// Retourne la liste de toutes les modifications appliquées à cette planète
+        /// (blocs posés ou détruits par le joueur).
+        /// </summary>
+        public List<PlanetBlockMod> GetModifications()
+        {
+            var result = new List<PlanetBlockMod>();
+            foreach (var kv in _modifications)
+            foreach (var bkv in kv.Value)
+            {
+                int packed = bkv.Key;
+                result.Add(new PlanetBlockMod
+                {
+                    face  = (int)kv.Key.Face,
+                    cu    = kv.Key.U,
+                    cv    = kv.Key.V,
+                    cr    = kv.Key.R,
+                    lx    = (byte)( packed        & 0xFF),
+                    ly    = (byte)((packed >>  8) & 0xFF),
+                    lz    = (byte)((packed >> 16) & 0xFF),
+                    block = bkv.Value,
+                });
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Applique une liste de modifications enregistrées (chargement d'une save).
+        /// Utilise SetBlockSilent + rebuild en batch pour minimiser les recomputs de mesh.
+        /// </summary>
+        public void ApplyModifications(List<PlanetBlockMod> mods)
+        {
+            if (mods == null || mods.Count == 0) return;
+
+            var dirtyChunks = new HashSet<FaceChunkCoord>();
+
+            foreach (var mod in mods)
+            {
+                var coord = new FaceChunkCoord((FaceIndex)mod.face, mod.cu, mod.cv, mod.cr);
+                if (!_chunks.TryGetValue(coord, out ChunkRenderer cr)) continue;
+
+                cr.SetBlockSilent(mod.lx, mod.ly, mod.lz, (BlockType)mod.block);
+                RecordModification(coord, mod.lx, mod.ly, mod.lz, mod.block);
+                dirtyChunks.Add(coord);
+            }
+
+            // Rebuild tous les chunks impactés + leurs voisins
+            var toRebuild = new HashSet<FaceChunkCoord>(dirtyChunks);
+            foreach (var coord in dirtyChunks)
+            {
+                Quaternion rot = SphereFace.GetRotation(coord.Face);
+                Vector3 cs_vec = Vector3.one * VoxelData.ChunkWidth;
+                // Centre approximatif du chunk
+                int fi = (int)coord.Face;
+                Vector3 center = PlanetCenter
+                    + SphereFace.Rights  [fi] * (coord.U * VoxelData.ChunkWidth + VoxelData.ChunkWidth * 0.5f)
+                    + SphereFace.Normals [fi] * (coord.R * VoxelData.ChunkWidth + VoxelData.ChunkWidth * 0.5f)
+                    + SphereFace.Forwards[fi] * (coord.V * VoxelData.ChunkWidth + VoxelData.ChunkWidth * 0.5f);
+                for (int f = 0; f < 6; f++)
+                {
+                    Vector3 offset = new Vector3(
+                        VoxelData.FaceChecks[f, 0],
+                        VoxelData.FaceChecks[f, 1],
+                        VoxelData.FaceChecks[f, 2]);
+                    FaceChunkCoord nb = WorldToFaceChunk(center + rot * offset);
+                    if (!nb.Equals(coord)) toRebuild.Add(nb);
+                }
+            }
+
+            foreach (var coord in toRebuild)
+                if (_chunks.TryGetValue(coord, out ChunkRenderer cr))
+                    cr.RebuildMesh();
         }
 
         // ── Interne ───────────────────────────────────────────

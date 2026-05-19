@@ -101,6 +101,13 @@ namespace AstroVoxel.VoxelEngine
         public byte GetBlock(int x, int y, int z) => _chunkData.GetBlock(x, y, z);
 
         /// <summary>
+        /// Définit un bloc SANS reconstruire le mesh.
+        /// À utiliser lors de chargements en batch ; appeler <see cref="RebuildMesh"/> ensuite.
+        /// </summary>
+        public void SetBlockSilent(int x, int y, int z, BlockType type)
+            => _chunkData?.SetBlock(x, y, z, type);
+
+        /// <summary>
         /// Initialise ce chunk en mode planétaire (18-Face Cube-Sphère Octaédrique).
         /// Appelé par <see cref="PlanetWorld"/> juste après AddComponent.
         /// </summary>

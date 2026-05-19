@@ -20,10 +20,12 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 using AstroVoxel.Space;
+using AstroVoxel.Save;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -242,6 +244,9 @@ namespace AstroVoxel.Player
                 case "clear":   CmdClear();             break;
                 case "seed":    CmdSeed();              break;
                 case "restart": CmdRestart();           break;
+                case "save":    CmdSave(parts);         break;
+                case "load":    CmdLoad(parts);         break;
+                case "saves":   CmdListSaves();         break;
                 default:
                     PushErr($"Commande inconnue : <b>{Esc(parts[0])}</b>  —  tapez <b>help</b>");
                     break;
@@ -255,8 +260,13 @@ namespace AstroVoxel.Player
             string sep = $"<color=#{H(_sub)}>{'─'.ToString().PadRight(50, '─')}</color>";
             Push(sep);
             Push($"<b><color=#{H(_primary)}>AstroVoxel Console</color></b>");
-            Push($"  <color=#{H(_blue)}>/clear</color>    <color=#{H(_sub)}>Vide tous les blocs de la hotbar</color>");            Push($"  <color=#{H(_blue)}>/seed</color>     <color=#{H(_sub)}>Affiche la seed du monde actuel</color>");
-            Push($"  <color=#{H(_blue)}>/restart</color>  <color=#{H(_sub)}>Redémarre avec une nouvelle seed aléatoire</color>");            Push(sep);
+            Push($"  <color=#{H(_blue)}>/clear</color>    <color=#{H(_sub)}>Vide tous les blocs de la hotbar</color>");
+            Push($"  <color=#{H(_blue)}>/seed</color>     <color=#{H(_sub)}>Affiche la seed du monde actuel</color>");
+            Push($"  <color=#{H(_blue)}>/restart</color>  <color=#{H(_sub)}>Redémarre avec une nouvelle seed aléatoire</color>");
+            Push($"  <color=#{H(_blue)}>/save NOM</color> <color=#{H(_sub)}>Sauvegarde le monde sous le nom NOM</color>");
+            Push($"  <color=#{H(_blue)}>/load NOM</color> <color=#{H(_sub)}>Charge la sauvegarde NOM</color>");
+            Push($"  <color=#{H(_blue)}>/saves</color>    <color=#{H(_sub)}>Liste toutes les sauvegardes disponibles</color>");
+            Push(sep);
         }
 
         private void CmdClear()
@@ -285,6 +295,64 @@ namespace AstroVoxel.Player
             yield return null;
             WorldSeedManager.GenerateNewSeed();
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        }
+
+        private void CmdSave(string[] parts)
+        {
+            if (parts.Length < 2) { PushErr("Usage : /save NOM"); return; }
+            if (SaveSystem.Instance == null) { PushErr("SaveSystem introuvable."); return; }
+            string name = SanitizeSaveName(parts[1]);
+            if (string.IsNullOrEmpty(name)) { PushErr("Nom de sauvegarde invalide."); return; }
+            try
+            {
+                SaveSystem.Instance.SaveWorld(name);
+                PushOk($"Monde sauvegardé : <b>{Esc(name)}</b>");
+            }
+            catch (Exception e)
+            {
+                PushErr($"Erreur lors de la sauvegarde : {Esc(e.Message)}");
+            }
+        }
+
+        private void CmdLoad(string[] parts)
+        {
+            if (parts.Length < 2) { PushErr("Usage : /load NOM"); return; }
+            if (SaveSystem.Instance == null) { PushErr("SaveSystem introuvable."); return; }
+            string name = SanitizeSaveName(parts[1]);
+            if (string.IsNullOrEmpty(name)) { PushErr("Nom de sauvegarde invalide."); return; }
+            if (!SaveSystem.Instance.SaveExists(name)) { PushErr($"Sauvegarde introuvable : <b>{Esc(name)}</b>"); return; }
+            PushOk($"Chargement de <b>{Esc(name)}</b>…");
+            StartCoroutine(CoLoad(name));
+        }
+
+        private static IEnumerator CoLoad(string name)
+        {
+            yield return null;  // laisse le message s'afficher
+            SaveSystem.Instance.LoadWorld(name);
+        }
+
+        private void CmdListSaves()
+        {
+            if (SaveSystem.Instance == null) { PushErr("SaveSystem introuvable."); return; }
+            string[] names = SaveSystem.Instance.GetSaveNames();
+            if (names.Length == 0)
+            {
+                Push($"<color=#{H(_sub)}>Aucune sauvegarde trouvée.</color>");
+                return;
+            }
+            Push($"<color=#{H(_blue)}>Sauvegardes ({names.Length}) :</color>");
+            foreach (var n in names)
+                Push($"  <color=#{H(_primary)}>{Esc(n)}</color>");
+        }
+
+        private static string SanitizeSaveName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "";
+            char[] invalid = Path.GetInvalidFileNameChars();
+            var sb = new System.Text.StringBuilder(name.Length);
+            foreach (char c in name)
+                if (Array.IndexOf(invalid, c) < 0) sb.Append(c);
+            return sb.ToString().Trim();
         }
 
         // ── Log helpers ───────────────────────────────────────

@@ -24,12 +24,26 @@ namespace AstroVoxel.Space
 
         /// <summary>
         /// Initialise la seed. Appelé par GameBootstrap au démarrage.
-        /// Si appelé avec seed=0 et pas encore initialisé, génère une seed aléatoire.
+        /// Idempotent : si déjà initialisée (après /restart ou /load), ne fait rien.
+        /// Utiliser <see cref="ForceInitialize"/> pour forcer une seed précise.
         /// </summary>
         public static void Initialize(int seed = 0)
         {
-            if (seed == 0 && !IsInitialized)
+            // Déjà initialisée (après rechargement de scène) : conserver la seed courante.
+            if (IsInitialized) return;
+
+            if (seed == 0)
                 seed = GenerateRandom();
+            Seed          = seed;
+            IsInitialized = true;
+        }
+
+        /// <summary>
+        /// Force une seed précise sans vérification d'état.
+        /// Utilisé par <see cref="AstroVoxel.Save.SaveSystem"/> pour restaurer une sauvegarde.
+        /// </summary>
+        public static void ForceInitialize(int seed)
+        {
             Seed          = seed;
             IsInitialized = true;
         }
