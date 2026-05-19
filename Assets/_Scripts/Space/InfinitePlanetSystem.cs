@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using AstroVoxel.VoxelEngine;
 using AstroVoxel.Physics;
+using AstroVoxel.Environment;
 
 namespace AstroVoxel.Space
 {
@@ -44,7 +45,8 @@ namespace AstroVoxel.Space
         public const float VoxelDeactivate = 450f;
 
         /// <summary>Rayon max pour le chargement voxel (au-delà = impostor uniquement).</summary>
-        public const float MaxVoxelRadius  = 90f;
+        /// <remarks>Plus de limite : toutes les planètes peuvent charger des voxels.</remarks>
+        public const float MaxVoxelRadius  = float.MaxValue;
 
         /// <summary>Nombre de planètes dans le monde (assure l'infini en exploration).</summary>
         private const int PlanetCount = 512;
@@ -212,8 +214,8 @@ namespace AstroVoxel.Space
                         0);
                 }
 
-                // Trouve la planète la plus proche éligible pour voxels
-                if (d < closestD && _planets[i].Config.CoreRadius <= MaxVoxelRadius)
+                // Trouve la planète la plus proche éligible pour voxels (toutes tailles)
+                if (d < closestD)
                 {
                     closestD = d;
                     closest  = i;
@@ -261,8 +263,25 @@ namespace AstroVoxel.Space
             _activeGO = new GameObject($"Planet_{index}_{entry.Config.Biome}");
             _activeGO.transform.position = entry.Position;
 
-            // Gravité surfacique
-            _activeGO.AddComponent<GravityAttractor>();
+            // Gravité surfacique.
+            // InfluenceRadius fini → traité comme un très grand astéroïde par
+            // GravityBody.FindBestAttractor() et SpaceShipController.ApplyAsteroidGravity().
+            // Force = même que la planète de base (13.54 m/s²), portée ∝ rayon.
+            var attractor = _activeGO.AddComponent<GravityAttractor>();
+            attractor.SetAsteroidParams(
+                force:     13.54f,
+                influence: entry.Config.CoreRadius * 10f + 300f);
+
+            // Couche d'ozone adaptée au rayon de cette planète
+            var ozoneLayer = _activeGO.AddComponent<OzoneLayer>();
+            ozoneLayer.SetCoreRadius(entry.Config.CoreRadius);
+
+            // Atmosphère visuelle : ciel + anneau d'ozone
+            var atmGO = new GameObject("Atmosphere");
+            atmGO.transform.SetParent(_activeGO.transform, false);
+            atmGO.transform.localPosition = Vector3.zero;
+            var atm = atmGO.AddComponent<AtmosphereRenderer>();
+            atm.Init(_player, ozoneLayer);
 
             // Monde voxel
             _activeWorld = _activeGO.AddComponent<PlanetWorld>();

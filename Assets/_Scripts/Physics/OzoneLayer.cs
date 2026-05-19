@@ -29,11 +29,18 @@ namespace AstroVoxel.Physics
         [Tooltip("Épaisseur de la zone de transition (progressivité de la frontière).")]
         [SerializeField, Range(0f, 10f)] private float transitionThickness = 3f;
 
+        // Override de rayon pour les planètes procédurales (sinon utilise PlanetChunkGenerator.PlanetCoreRadius)
+        private float _coreRadiusOverride = -1f;
+
+        /// <summary>Permet de définir un rayon de cœur personnalisé (planètes infinies).</summary>
+        public void SetCoreRadius(float radius) => _coreRadiusOverride = radius;
+
         // ── Propriétés ────────────────────────────────────────
 
         /// <summary>Rayon de la couche d'ozone = surface + hauteur atmosphérique.</summary>
         public float AtmosphereRadius =>
-            PlanetChunkGenerator.PlanetCoreRadius + atmosphereHeight;
+            (_coreRadiusOverride > 0f ? _coreRadiusOverride : PlanetChunkGenerator.PlanetCoreRadius)
+            + atmosphereHeight;
 
         /// <summary>Centre de la planète (position monde du GameObject).</summary>
         public Vector3 Center => transform.position;

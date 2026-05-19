@@ -64,11 +64,13 @@ namespace AstroVoxel.Environment
         /// Initialise le rendu atmosphérique.
         /// Doit être appelé depuis GameBootstrap après la création du joueur.
         /// </summary>
-        public void Init(Transform player)
+        /// <param name="player">Transform utilisé pour détecter si on est dans l'atmosphère.</param>
+        /// <param name="ozoneOverride">OzoneLayer à utiliser (si null, FindAnyObjectByType).</param>
+        public void Init(Transform player, OzoneLayer ozoneOverride = null)
         {
             _player    = player;
             _sunOrbit  = FindAnyObjectByType<SunOrbit>();
-            _ozoneLayer = FindAnyObjectByType<OzoneLayer>();
+            _ozoneLayer = ozoneOverride ?? FindAnyObjectByType<OzoneLayer>();
 
             float atmR   = _ozoneLayer != null ? _ozoneLayer.AtmosphereRadius - 1.5f : 78.5f;
             float ozoneR = _ozoneLayer != null ? _ozoneLayer.AtmosphereRadius         : 80.0f;
@@ -163,6 +165,9 @@ namespace AstroVoxel.Environment
             _skyMat = new Material(shader);
             _skyMat.SetColor("_ZenithColor",  zenithColor);
             _skyMat.SetColor("_HorizonColor", horizonColor);
+            // Centre de la planète pour que le shader fonctionne hors de l'origine
+            Vector3 c = transform.position;
+            _skyMat.SetVector("_PlanetCenter", new Vector4(c.x, c.y, c.z, 0f));
             mr.sharedMaterial = _skyMat;
         }
 

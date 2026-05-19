@@ -20,6 +20,7 @@ Shader "AstroVoxel/AtmosphereSky"
         _NightFactor  ("Night Factor",   Range(0, 1)) = 0
         _SunDir       ("Sun Direction",  Vector)     = (1, 0, 0, 0)
         _Intensity    ("Intensity",      Range(0, 2)) = 1.0
+        _PlanetCenter ("Planet Center",  Vector)     = (0, 0, 0, 0)
     }
 
     SubShader
@@ -56,6 +57,7 @@ Shader "AstroVoxel/AtmosphereSky"
             float4 _ZenithColor, _HorizonColor;
             float  _NightFactor, _Intensity;
             float4 _SunDir;
+            float4 _PlanetCenter;
 
             // ── Vertex ────────────────────────────────────────
 
@@ -72,10 +74,10 @@ Shader "AstroVoxel/AtmosphereSky"
             fixed4 frag(v2f i, fixed facing : VFACE) : SV_Target
             {
                 // ── Repères ───────────────────────────────────────────────
-                // La planète est toujours à l'origine.
                 // camUp = "haut" planétaire depuis la caméra.
+                // _PlanetCenter permet de gérer les planètes hors de l'origine.
                 float3 camPos  = _WorldSpaceCameraPos;
-                float3 camUp   = normalize(camPos);
+                float3 camUp   = normalize(camPos - _PlanetCenter.xyz);
                 // viewDir : du fragment vers la caméra
                 float3 viewDir = normalize(camPos - i.worldPos);
 
@@ -119,7 +121,7 @@ Shader "AstroVoxel/AtmosphereSky"
                 else
                 {
                     // ── Vue depuis l'espace : couronne atmosphérique ──────────
-                    float3 N      = normalize(i.worldPos); // normal outward
+                    float3 N      = normalize(i.worldPos - _PlanetCenter.xyz); // normal outward
                     float  ndotv  = abs(dot(N, viewDir));
                     float  fresnel = pow(1.0 - ndotv, 4.5);
 
