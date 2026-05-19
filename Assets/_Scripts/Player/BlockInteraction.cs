@@ -75,9 +75,6 @@ namespace AstroVoxel.Player
                 if (GetMouseDown(1)) TryPlaceBlock();
             }
 
-            if (GetMouseDown(1))   // Clic droit
-                TryPlaceBlock();
-
             // Scroll ou touches pour changer le bloc actif
             HandleBlockSelection();
         }
@@ -264,6 +261,8 @@ namespace AstroVoxel.Player
         {
             Vector3 pos = hit.point - hit.normal * 0.5f;
             ChunkRenderer cr = hit.collider?.GetComponent<ChunkRenderer>();
+            // Fallback : cherche le chunk via le world (cas de bords de chunk)
+            if (cr == null && world != null) cr = world.GetChunkAt(pos);
             if (cr == null) return BlockType.Air;
             Vector3 local = cr.transform.InverseTransformPoint(pos);
             int lx = Mathf.Clamp(Mathf.FloorToInt(local.x), 0, VoxelData.ChunkWidth  - 1);

@@ -21,7 +21,6 @@ namespace AstroVoxel.Player
         private const float BobAmplitude    = 0.15f;  // amplitude du flottement
         private const float BobSpeed        = 2.0f;   // vitesse du flottement
         private const float RotationSpeed   = 90f;    // degrés/s
-        private const float MagnetSpeed     = 8f;     // vitesse d'aspiration vers le joueur
         private const float LifeTime        = 300f;   // auto-dépop après 5 min
 
         // ── État instance ─────────────────────────────────────
@@ -30,7 +29,6 @@ namespace AstroVoxel.Player
         private Vector3   _basePos;
         private float     _bobPhase;
         private bool      _collectible;
-        private bool      _attracted;
 
         // ── Factory statique ──────────────────────────────────
 
@@ -99,32 +97,18 @@ namespace AstroVoxel.Player
 
         private void Update()
         {
-            if (_attracted)
-            {
-                // Aspiration vers le joueur
-                if (_player == null) { Collect(); return; }
-                float speed = MagnetSpeed * Time.deltaTime;
-                transform.position = Vector3.MoveTowards(
-                    transform.position, _player.position + _player.up, speed);
+            // Flottement + rotation
+            _bobPhase += BobSpeed * Time.deltaTime;
+            float y = _basePos.y + Mathf.Sin(_bobPhase) * BobAmplitude;
+            transform.position = new Vector3(_basePos.x, y, _basePos.z);
+            transform.Rotate(Vector3.up, RotationSpeed * Time.deltaTime, UnityEngine.Space.World);
 
-                if (Vector3.Distance(transform.position, _player.position) < 0.5f)
+            // Vérification distance joueur
+            if (_collectible && _player != null)
+            {
+                float dist = Vector3.Distance(transform.position, _player.position);
+                if (dist <= PickupRadius)
                     Collect();
-            }
-            else
-            {
-                // Flottement + rotation
-                _bobPhase += BobSpeed * Time.deltaTime;
-                float y = _basePos.y + Mathf.Sin(_bobPhase) * BobAmplitude;
-                transform.position = new Vector3(_basePos.x, y, _basePos.z);
-                transform.Rotate(Vector3.up, RotationSpeed * Time.deltaTime, UnityEngine.Space.World);
-
-                // Vérification distance joueur
-                if (_collectible && _player != null)
-                {
-                    float dist = Vector3.Distance(transform.position, _player.position);
-                    if (dist <= PickupRadius)
-                        _attracted = true;
-                }
             }
         }
 
