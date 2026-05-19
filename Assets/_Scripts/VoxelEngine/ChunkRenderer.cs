@@ -67,8 +67,11 @@ namespace AstroVoxel.VoxelEngine
 
             if (_fallbackMat == null)
             {
-                _fallbackMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Diffuse"));
-                _fallbackMat.color = new Color(0.5f, 0.45f, 0.4f);
+                // Utilise le même shader que le BlockTextureRegistry pour éviter les matériaux roses
+                var fbShader = Shader.Find("AstroVoxel/BlockUnlit")
+                            ?? Shader.Find("Universal Render Pipeline/Unlit")
+                            ?? Shader.Find("Unlit/Texture");
+                _fallbackMat = new Material(fbShader) { color = new Color(0.5f, 0.45f, 0.4f) };
             }
         }
 
@@ -101,15 +104,26 @@ namespace AstroVoxel.VoxelEngine
         /// Initialise ce chunk en mode planétaire (18-Face Cube-Sphère Octaédrique).
         /// Appelé par <see cref="PlanetWorld"/> juste après AddComponent.
         /// </summary>
-        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter, IVoxelWorld world, Quaternion chunkRotation, FaceIndex chunkFace, Material[] blockMaterials = null, System.Func<Vector3, byte> oobProvider = null, ChunkData preGeneratedData = null, bool useRadialOrientation = true)
+        public void InitFromWorld(Vector3 worldOrigin, Vector3 planetCenter, IVoxelWorld world, Quaternion chunkRotation, FaceIndex chunkFace, Material[] blockMaterials = null, System.Func<Vector3, byte> oobProvider = null, ChunkData preGeneratedData = null, bool useRadialOrientation = true, AstroVoxel.VoxelEngine.PlanetGenerationConfig? genConfig = null)
         {
             _planetCenter   = planetCenter;
             _blockMaterials = blockMaterials;
             _world          = world;
             _chunkRotation  = chunkRotation;
             _chunkFace      = chunkFace;
-            _oobBlockProvider = oobProvider ?? (pos => (byte)PlanetChunkGenerator.GetBlockType(pos, _planetCenter));
             _useRadialOrientation = useRadialOrientation;
+
+            // Résoudre le fournisseur OOB : priorité au genConfig, puis au oobProvider explicite
+            if (genConfig.HasValue)
+            {
+                var cfg    = genConfig.Value;
+                var center = planetCenter;
+                _oobBlockProvider = oobProvider ?? (pos => (byte)PlanetChunkGenerator.GetBlockType(pos, center, cfg));
+            }
+            else
+            {
+                _oobBlockProvider = oobProvider ?? (pos => (byte)PlanetChunkGenerator.GetBlockType(pos, _planetCenter));
+            }
 
             // Awake peut ne pas encore avoir été appelé si AddComponent vient de se faire
             if (_mesh == null)
@@ -129,6 +143,12 @@ namespace AstroVoxel.VoxelEngine
             if (preGeneratedData != null)
             {
                 _chunkData = preGeneratedData;
+            }
+            else if (genConfig.HasValue)
+            {
+                _chunkData = new ChunkData();
+                var cfg = genConfig.Value;
+                PlanetChunkGenerator.Generate(_chunkData, worldOrigin, _planetCenter, _chunkRotation, _chunkFace, in cfg);
             }
             else
             {

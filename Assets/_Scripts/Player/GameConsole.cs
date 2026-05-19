@@ -22,6 +22,8 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using UnityEngine.SceneManagement;
+using AstroVoxel.Space;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -63,6 +65,7 @@ namespace AstroVoxel.Player
         private CanvasGroup   _cg;
         private InputField    _inputField;
         private Text          _outputText;
+        private RectTransform _contentRT;
         private ScrollRect    _scroll;
 
         private readonly List<string> _log     = new();
@@ -235,8 +238,10 @@ namespace AstroVoxel.Player
             string verb = parts[0].TrimStart('/').ToLowerInvariant();
             switch (verb)
             {
-                case "help":  CmdHelp();  break;
-                case "clear": CmdClear(); break;
+                case "help":    CmdHelp();              break;
+                case "clear":   CmdClear();             break;
+                case "seed":    CmdSeed();              break;
+                case "restart": CmdRestart();           break;
                 default:
                     PushErr($"Commande inconnue : <b>{Esc(parts[0])}</b>  —  tapez <b>help</b>");
                     break;
@@ -250,8 +255,8 @@ namespace AstroVoxel.Player
             string sep = $"<color=#{H(_sub)}>{'─'.ToString().PadRight(50, '─')}</color>";
             Push(sep);
             Push($"<b><color=#{H(_primary)}>AstroVoxel Console</color></b>");
-            Push($"  <color=#{H(_blue)}>/clear</color>    <color=#{H(_sub)}>Vide tous les blocs de la hotbar</color>");
-            Push(sep);
+            Push($"  <color=#{H(_blue)}>/clear</color>    <color=#{H(_sub)}>Vide tous les blocs de la hotbar</color>");            Push($"  <color=#{H(_blue)}>/seed</color>     <color=#{H(_sub)}>Affiche la seed du monde actuel</color>");
+            Push($"  <color=#{H(_blue)}>/restart</color>  <color=#{H(_sub)}>Redémarre avec une nouvelle seed aléatoire</color>");            Push(sep);
         }
 
         private void CmdClear()
@@ -259,6 +264,27 @@ namespace AstroVoxel.Player
             if (_bi == null) { PushErr("Référence introuvable."); return; }
             _bi.ClearInventory();
             PushOk("Hotbar vidée.");
+        }
+
+        private void CmdSeed()
+        {
+            int seed = WorldSeedManager.Seed;
+            Push($"<color=#{H(_blue)}>SEED</color>  <color=#{H(_primary)}><b>{seed}</b></color>");
+            Push($"  <color=#{H(_sub)}>Notez cette valeur pour retrouver ce monde.</color>");
+        }
+
+        private void CmdRestart()
+        {
+            PushOk("Génération d'une nouvelle seed…");
+            StartCoroutine(CoRestart());
+        }
+
+        private static IEnumerator CoRestart()
+        {
+            // Attend 1 frame pour que le message s'affiche
+            yield return null;
+            WorldSeedManager.GenerateNewSeed();
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
 
         // ── Log helpers ───────────────────────────────────────
@@ -277,6 +303,18 @@ namespace AstroVoxel.Player
         {
             if (_outputText == null) return;
             _outputText.text = string.Join("\n", _log);
+
+            // Pass 1 – let the canvas compute rect widths so preferredHeight is valid.
+            Canvas.ForceUpdateCanvases();
+
+            // Manually drive content height (ContentSizeFitter is unreliable at init time).
+            if (_contentRT != null)
+            {
+                float h = Mathf.Max(_outputText.preferredHeight + 16f, 10f);
+                _contentRT.sizeDelta = new Vector2(_contentRT.sizeDelta.x, h);
+            }
+
+            // Pass 2 – let the scroll rect react to the new content height.
             Canvas.ForceUpdateCanvases();
             if (_scroll != null) _scroll.verticalNormalizedPosition = 0f;
         }
@@ -469,20 +507,19 @@ namespace AstroVoxel.Player
             _outputText.verticalOverflow   = VerticalWrapMode.Overflow;
             _outputText.lineSpacing        = 1.35f;
 
-            var csf = contentGO.AddComponent<ContentSizeFitter>();
-            csf.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-            csf.verticalFit   = ContentSizeFitter.FitMode.PreferredSize;
-
-            // Stretch full width with horizontal padding, grow downward from top
-            var contentRT = contentGO.GetComponent<RectTransform>();
-            contentRT.anchorMin        = new Vector2(0f, 1f);
-            contentRT.anchorMax        = new Vector2(1f, 1f);
-            contentRT.pivot            = new Vector2(0.5f, 1f);
-            contentRT.sizeDelta        = new Vector2(-24f, 10f);
-            contentRT.anchoredPosition = new Vector2(0f, -8f);
+            // Stretch full width with horizontal padding, grow downward from top.
+            // ContentSizeFitter is intentionally NOT used here: it reads preferredHeight
+            // before the canvas has computed rect widths (same Awake frame), giving 0.
+            // Instead we set height manually in Refresh() after ForceUpdateCanvases().
+            _contentRT = contentGO.GetComponent<RectTransform>();
+            _contentRT.anchorMin        = new Vector2(0f, 1f);
+            _contentRT.anchorMax        = new Vector2(1f, 1f);
+            _contentRT.pivot            = new Vector2(0.5f, 1f);
+            _contentRT.sizeDelta        = new Vector2(-24f, 10f);
+            _contentRT.anchoredPosition = new Vector2(0f, -8f);
 
             _scroll.viewport = vpRT;
-            _scroll.content  = contentRT;
+            _scroll.content  = _contentRT;
 
             // Welcome message
             string sep = $"<color=#{H(_sub)}>{'─'.ToString().PadRight(50, '─')}</color>";

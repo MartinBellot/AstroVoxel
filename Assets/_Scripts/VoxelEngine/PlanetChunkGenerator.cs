@@ -376,5 +376,390 @@ namespace AstroVoxel.VoxelEngine
                 return (int)((uint)h & 0x7FFFFFFF);
             }
         }
+
+        // ═══════════════════════════════════════════════════════
+        //  GÉNÉRATION PROCÉDURALE AVEC CONFIG (SEED + BIOME)
+        // ═══════════════════════════════════════════════════════
+
+        // ── Masque de couture (partagé) ───────────────────────
+        private const float kSeamMarginCfg = 0.10f;
+
+        /// <summary>
+        /// Version avec config complète : seed + biome + rayon arbitraire.
+        /// Point d'entrée pour toutes les planètes procédurales et la home planet.
+        /// </summary>
+        public static byte GetBlockType(Vector3 worldPos, Vector3 planetCenter, in PlanetGenerationConfig cfg)
+        {
+            float dx   = worldPos.x - planetCenter.x;
+            float dy   = worldPos.y - planetCenter.y;
+            float dz   = worldPos.z - planetCenter.z;
+            float dist = Mathf.Sqrt(dx * dx + dy * dy + dz * dz);
+
+            if (dist < 0.001f) return GetDeepBlock(cfg.Biome);
+
+            float invDist = 1f / dist;
+            float ndx = dx * invDist;
+            float ndy = dy * invDist;
+            float ndz = dz * invDist;
+
+            float so = cfg.NoiseOffset;
+            float freq = cfg.SurfaceFrequency * cfg.CoreRadius;
+
+            float nx = ndx * freq + 100f + so;
+            float ny = ndy * freq + 200f + so;
+            float nz = ndz * freq + 300f + so;
+            float noise = (Mathf.PerlinNoise(nx, nz) + Mathf.PerlinNoise(ny, nx)) * 0.5f;
+
+            float surfaceRadius = cfg.CoreRadius + cfg.SurfaceAmplitude * (noise - 0.5f);
+
+            float depth = surfaceRadius - dist;
+
+            bool cave = cfg.HasCaves
+                && (depth > 0f && depth <= cfg.CrustThickness + 3f)
+                && IsCaveWithConfig(worldPos, depth, in cfg);
+
+            if (dist > surfaceRadius + 0.5f) return (byte)BlockType.Air;
+
+            // Surface (top block)
+            if (dist > surfaceRadius - 0.5f)
+                return cave ? (byte)BlockType.Air : GetSurfaceBlock(cfg.Biome, worldPos, so);
+
+            // Sub-surface (~2-3 blocs)
+            if (dist > surfaceRadius - 3.5f)
+                return cave ? (byte)BlockType.Air : GetSubSurfaceBlock(cfg.Biome);
+
+            if (cave) return (byte)BlockType.Air;
+
+            // Deep (including ore veins)
+            return GetDeepBlockWithOres(cfg.Biome, worldPos, depth, so);
+        }
+
+        /// <summary>
+        /// Génère un chunk complet avec la config complète (seed + biome).
+        /// </summary>
+        public static void Generate(
+            ChunkData  data,
+            Vector3    chunkOriginWorld,
+            Vector3    planetCenter,
+            Quaternion chunkRotation,
+            FaceIndex  chunkFace,
+            in PlanetGenerationConfig cfg)
+        {
+            int w = data.Width;
+            int h = data.Height;
+
+            for (int z = 0; z < w; z++)
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                Vector3 blockPos = chunkOriginWorld + chunkRotation * new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
+                Vector3 rel      = blockPos - planetCenter;
+
+                // Masque de face (couture)
+                FaceIndex blockFace = SphereFace.GetFace(rel);
+                if (blockFace != chunkFace)
+                {
+                    Vector3 dir     = rel.normalized;
+                    float dotSelf   = Vector3.Dot(dir, SphereFace.Normals[(int)chunkFace]);
+                    float dotBest   = Vector3.Dot(dir, SphereFace.Normals[(int)blockFace]);
+                    if (dotBest - dotSelf > kSeamMarginCfg)
+                    {
+                        data.SetBlock(x, y, z, (byte)BlockType.Air);
+                        continue;
+                    }
+                }
+
+                data.SetBlock(x, y, z, GetBlockType(blockPos, planetCenter, in cfg));
+            }
+
+            if (cfg.HasTrees)
+                PlaceTreesWithConfig(data, chunkOriginWorld, planetCenter, chunkRotation, in cfg);
+        }
+
+        // ── Blocs de surface par biome ────────────────────────
+
+        private static byte GetSurfaceBlock(PlanetBiome biome, Vector3 pos, float so)
+        {
+            switch (biome)
+            {
+                case PlanetBiome.Terran:   return (byte)BlockType.Grass;
+                case PlanetBiome.Desert:
+                    // Mix sable / sable rouge selon bruit
+                    return Mathf.PerlinNoise(pos.x * 0.05f + so, pos.z * 0.05f + so) > 0.65f
+                        ? (byte)BlockType.RedSand
+                        : (byte)BlockType.Sand;
+                case PlanetBiome.Snow:     return (byte)BlockType.PackedIce;
+                case PlanetBiome.Volcanic: return (byte)BlockType.Netherrack;
+                case PlanetBiome.Forest:   return (byte)BlockType.Grass;
+                case PlanetBiome.Mountain:
+                    // Pierre nue au sommet, herbe plus bas
+                    return Mathf.PerlinNoise(pos.x * 0.04f + so, pos.z * 0.04f + so) > 0.55f
+                        ? (byte)BlockType.Stone
+                        : (byte)BlockType.Grass;
+                case PlanetBiome.Endstone: return (byte)BlockType.EndStone;
+                case PlanetBiome.Crystal:  return (byte)BlockType.QuartzBricks;
+                case PlanetBiome.Nether:   return (byte)BlockType.Netherrack;
+                case PlanetBiome.Cherry:   return (byte)BlockType.Grass;
+                case PlanetBiome.Mossy:    return (byte)BlockType.MossyCobblestone;
+                default:                   return (byte)BlockType.Grass;
+            }
+        }
+
+        private static byte GetSubSurfaceBlock(PlanetBiome biome)
+        {
+            switch (biome)
+            {
+                case PlanetBiome.Terran:   return (byte)BlockType.Dirt;
+                case PlanetBiome.Desert:   return (byte)BlockType.Sandstone;
+                case PlanetBiome.Snow:     return (byte)BlockType.BlueIce;
+                case PlanetBiome.Volcanic: return (byte)BlockType.Blackstone;
+                case PlanetBiome.Forest:   return (byte)BlockType.Dirt;
+                case PlanetBiome.Mountain: return (byte)BlockType.Granite;
+                case PlanetBiome.Endstone: return (byte)BlockType.EndStone;
+                case PlanetBiome.Crystal:  return (byte)BlockType.PurpurBlock;
+                case PlanetBiome.Nether:   return (byte)BlockType.SoulSand;
+                case PlanetBiome.Cherry:   return (byte)BlockType.CoarseDirt;
+                case PlanetBiome.Mossy:    return (byte)BlockType.MossyStoneBricks;
+                default:                   return (byte)BlockType.Dirt;
+            }
+        }
+
+        private static byte GetDeepBlock(PlanetBiome biome)
+        {
+            switch (biome)
+            {
+                case PlanetBiome.Terran:   return (byte)BlockType.Stone;
+                case PlanetBiome.Desert:   return (byte)BlockType.RedSandstone;
+                case PlanetBiome.Snow:     return (byte)BlockType.Stone;
+                case PlanetBiome.Volcanic: return (byte)BlockType.Obsidian;
+                case PlanetBiome.Forest:   return (byte)BlockType.Stone;
+                case PlanetBiome.Mountain: return (byte)BlockType.Andesite;
+                case PlanetBiome.Endstone: return (byte)BlockType.PurpurBlock;
+                case PlanetBiome.Crystal:  return (byte)BlockType.Deepslate;
+                case PlanetBiome.Nether:   return (byte)BlockType.Blackstone;
+                case PlanetBiome.Cherry:   return (byte)BlockType.Stone;
+                case PlanetBiome.Mossy:    return (byte)BlockType.Cobblestone;
+                default:                   return (byte)BlockType.Stone;
+            }
+        }
+
+        private static byte GetDeepBlockWithOres(PlanetBiome biome, Vector3 pos, float depth, float so)
+        {
+            // Veines de Glowstone pour Volcanic et Nether
+            if (biome == PlanetBiome.Volcanic || biome == PlanetBiome.Nether)
+            {
+                float glow = Mathf.PerlinNoise(pos.x * 0.30f + so + 80f, pos.y * 0.30f + so + 80f);
+                if (glow > 0.88f) return (byte)BlockType.Glowstone;
+            }
+
+            // Minerais standard pour toutes les planètes rocheuses
+            if (depth > 3f)
+            {
+                float coalN = Mathf.PerlinNoise(pos.x * 0.22f + so + 10f, pos.z * 0.22f + so + 10f);
+                if (coalN > 0.87f) return (byte)BlockType.CoalOre;
+
+                float ironN = Mathf.PerlinNoise(pos.y * 0.25f + so + 30f, pos.x * 0.25f + so + 30f);
+                if (ironN > 0.88f) return (byte)BlockType.IronOre;
+
+                if (depth > 6f)
+                {
+                    float goldN = Mathf.PerlinNoise(pos.z * 0.28f + so + 50f, pos.y * 0.28f + so + 50f);
+                    if (goldN > 0.90f) return (byte)BlockType.GoldOre;
+
+                    float diaN = Mathf.PerlinNoise(pos.x * 0.32f + so + 70f, pos.z * 0.32f + so + 70f);
+                    if (diaN > 0.93f) return (byte)BlockType.DiamondOre;
+                }
+            }
+
+            return GetDeepBlock(biome);
+        }
+
+        // ── Grottes avec config ───────────────────────────────
+
+        private static bool IsCaveWithConfig(Vector3 p, float depth, in PlanetGenerationConfig cfg)
+        {
+            if (depth <= 0f) return false;
+
+            float pf       = CavePresenceFrequency;
+            float so       = cfg.NoiseOffset;
+            float presence = Mathf.PerlinNoise(p.x * pf + 50f + so, p.z * pf + 50f + so);
+            if (presence < cfg.CavePresenceThreshold) return false;
+
+            float f = cfg.CaveFrequency;
+            float a = Mathf.PerlinNoise(p.x * f + 500f + so, p.y * f + 500f + so);
+            float b = Mathf.PerlinNoise(p.y * f + 700f + so, p.z * f + 700f + so);
+            float c = Mathf.PerlinNoise(p.x * f + 300f + so, p.z * f + 300f + so);
+
+            float t = Mathf.Clamp01(depth / CaveTransitionDepth);
+            float r = Mathf.Lerp(cfg.CaveEntryRadius, cfg.CaveTubeRadius, t);
+
+            bool ab = Mathf.Abs(a - 0.5f) < r && Mathf.Abs(b - 0.5f) < r;
+            bool bc = Mathf.Abs(b - 0.5f) < r && Mathf.Abs(c - 0.5f) < r;
+            bool ac = Mathf.Abs(a - 0.5f) < r && Mathf.Abs(c - 0.5f) < r;
+
+            return ab || bc || ac;
+        }
+
+        // ── Arbres avec config ────────────────────────────────
+
+        private static void PlaceTreesWithConfig(
+            ChunkData data, Vector3 chunkOrigin, Vector3 planetCenter,
+            Quaternion chunkRotation, in PlanetGenerationConfig cfg)
+        {
+            int S      = TreeCellSize;
+            int expand = MaxTrunkHeight + MaxCanopyRadius + S;
+            int cs     = data.Width;
+
+            Vector3 chunkCenter  = chunkOrigin + chunkRotation * new Vector3(cs * 0.5f, cs * 0.5f, cs * 0.5f);
+            float   totalRadius  = cs * 0.8660254f + expand + S;
+
+            int gcMinX = Mathf.FloorToInt((chunkCenter.x - totalRadius) / S);
+            int gcMaxX = Mathf.CeilToInt ((chunkCenter.x + totalRadius) / S);
+            int gcMinY = Mathf.FloorToInt((chunkCenter.y - totalRadius) / S);
+            int gcMaxY = Mathf.CeilToInt ((chunkCenter.y + totalRadius) / S);
+            int gcMinZ = Mathf.FloorToInt((chunkCenter.z - totalRadius) / S);
+            int gcMaxZ = Mathf.CeilToInt ((chunkCenter.z + totalRadius) / S);
+
+            // spawnRatio : 1=dense, 2=normal, 3=rare
+            int spawnRatio = cfg.TreeDensity == 2 ? 2 :
+                             cfg.TreeDensity == 3 ? 5 : 3;
+
+            // Type d'arbre selon biome
+            byte logType, leafType;
+            GetTreeBlocks(cfg.Biome, out logType, out leafType);
+
+            float so = cfg.NoiseOffset;
+
+            for (int gx = gcMinX; gx <= gcMaxX; gx++)
+            for (int gy = gcMinY; gy <= gcMaxY; gy++)
+            for (int gz = gcMinZ; gz <= gcMaxZ; gz++)
+            {
+                // Hash seed-dépendant : intègre le noiseOffset comme salt entier
+                int salt = (int)(so * 100f);
+                int hash = HashTreeCell(gx ^ salt, gy, gz);
+
+                if ((hash % spawnRatio) != 0) continue;
+
+                float cx = (gx + 0.5f) * S;
+                float cy = (gy + 0.5f) * S;
+                float cz = (gz + 0.5f) * S;
+
+                float distFromCenter = Mathf.Sqrt(
+                    (cx - planetCenter.x) * (cx - planetCenter.x) +
+                    (cy - planetCenter.y) * (cy - planetCenter.y) +
+                    (cz - planetCenter.z) * (cz - planetCenter.z));
+
+                float surfMin = cfg.CoreRadius - 2f;
+                float surfMax = cfg.CoreRadius + cfg.SurfaceAmplitude + 6f;
+                if (distFromCenter < surfMin || distFromCenter > surfMax) continue;
+
+                float ddx = cx - planetCenter.x;
+                float ddy = cy - planetCenter.y;
+                float ddz = cz - planetCenter.z;
+                float inv = 1f / distFromCenter;
+                Vector3 up = new Vector3(ddx * inv, ddy * inv, ddz * inv);
+
+                Vector3 searchBase = FindSurfaceBlockBiome(planetCenter, up, in cfg);
+                if (searchBase == Vector3.positiveInfinity) continue;
+
+                int trunkH  = MinTrunkHeight + (int)((uint)hash >> 4)  % (MaxTrunkHeight  - MinTrunkHeight  + 1);
+                int canopyR = MinCanopyRadius + (int)((uint)hash >> 8)  % (MaxCanopyRadius - MinCanopyRadius + 1);
+
+                // Jungle trees : plus hauts
+                if (cfg.Biome == PlanetBiome.Forest)
+                {
+                    trunkH  = 5 + (int)((uint)hash >> 4) % 5;
+                    canopyR = 3 + (int)((uint)hash >> 8) % 2;
+                }
+
+                // Tronc
+                {
+                    const float dda = 0.45f;
+                    int steps = Mathf.CeilToInt(trunkH / dda);
+                    int prevTx = int.MinValue, prevTy = int.MinValue, prevTz = int.MinValue;
+                    for (int s = 1; s <= steps; s++)
+                    {
+                        float t  = Mathf.Min(s * dda, (float)trunkH);
+                        int   tx = Mathf.FloorToInt(searchBase.x + up.x * t);
+                        int   ty = Mathf.FloorToInt(searchBase.y + up.y * t);
+                        int   tz = Mathf.FloorToInt(searchBase.z + up.z * t);
+                        if (tx == prevTx && ty == prevTy && tz == prevTz) continue;
+                        TrySetBlock(data, chunkOrigin, tx, ty, tz, logType, overwrite: true, chunkRotation);
+                        prevTx = tx; prevTy = ty; prevTz = tz;
+                    }
+                }
+
+                // Canopy
+                Vector3 canopyCenter = new Vector3(
+                    searchBase.x + up.x * (trunkH + 0.5f),
+                    searchBase.y + up.y * (trunkH + 0.5f),
+                    searchBase.z + up.z * (trunkH + 0.5f));
+
+                int cr2 = canopyR;
+                for (int lx = -cr2; lx <= cr2; lx++)
+                for (int ly = -cr2; ly <= cr2; ly++)
+                for (int lz = -cr2; lz <= cr2; lz++)
+                {
+                    if (lx * lx + ly * ly + lz * lz > cr2 * cr2) continue;
+                    int wx = Mathf.FloorToInt(canopyCenter.x) + lx;
+                    int wy = Mathf.FloorToInt(canopyCenter.y) + ly;
+                    int wz = Mathf.FloorToInt(canopyCenter.z) + lz;
+                    TrySetBlock(data, chunkOrigin, wx, wy, wz, leafType, overwrite: false, chunkRotation);
+                }
+            }
+        }
+
+        /// <summary>Détermine les blocs log/feuilles selon le biome.</summary>
+        private static void GetTreeBlocks(PlanetBiome biome, out byte log, out byte leaf)
+        {
+            switch (biome)
+            {
+                case PlanetBiome.Snow:
+                    log  = (byte)BlockType.SpruceLog;
+                    leaf = (byte)BlockType.SpruceLeaves;
+                    break;
+                case PlanetBiome.Forest:
+                    log  = (byte)BlockType.JungleLog;
+                    leaf = (byte)BlockType.JungleLeaves;
+                    break;
+                case PlanetBiome.Mountain:
+                    log  = (byte)BlockType.Wood;
+                    leaf = (byte)BlockType.Leaves;
+                    break;
+                case PlanetBiome.Cherry:
+                    log  = (byte)BlockType.CherryLog;
+                    leaf = (byte)BlockType.CherryLeaves;
+                    break;
+                case PlanetBiome.Mossy:
+                    log  = (byte)BlockType.DarkOakLog;
+                    leaf = (byte)BlockType.DarkOakLeaves;
+                    break;
+                default:
+                    log  = (byte)BlockType.Wood;
+                    leaf = (byte)BlockType.Leaves;
+                    break;
+            }
+        }
+
+        /// <summary>Cherche la surface dans un biome donné.</summary>
+        private static Vector3 FindSurfaceBlockBiome(
+            Vector3 planetCenter, Vector3 up, in PlanetGenerationConfig cfg)
+        {
+            float maxR = cfg.CoreRadius + cfg.SurfaceAmplitude + 4f;
+            float minR = cfg.CoreRadius - 2f;
+
+            for (float r = maxR; r >= minR; r -= 1f)
+            {
+                Vector3 worldPos = planetCenter + up * r;
+                byte bt = GetBlockType(worldPos, planetCenter, in cfg);
+                // Surface = premier bloc solide non-sous-sol (herbe ou équivalent)
+                if (bt != (byte)BlockType.Air && bt != (byte)BlockType.Dirt
+                    && bt != (byte)BlockType.Stone && bt != (byte)BlockType.Deepslate
+                    && bt != (byte)BlockType.Andesite && bt != (byte)BlockType.Granite
+                    && bt != (byte)BlockType.Sandstone && bt != (byte)BlockType.RedSandstone)
+                    return worldPos;
+            }
+            return Vector3.positiveInfinity;
+        }
     }
 }

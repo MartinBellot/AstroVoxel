@@ -14,8 +14,10 @@
 //    face-locaux → cohérents avec les données générées.
 // ============================================================
 
+using System.Collections;
 using System.Collections.Generic;   // Dictionary
 using UnityEngine;
+using AstroVoxel.Space;
 
 namespace AstroVoxel.VoxelEngine
 {
@@ -33,12 +35,28 @@ namespace AstroVoxel.VoxelEngine
         [Tooltip("Matériaux par type de bloc (index = (byte)BlockType).")]
         [SerializeField] public Material[] blockMaterials;
 
-        // ── État interne ───────────────────────────────────────
+        // ── Config procédurale (optionnelle) ──────────────────────
+        /// <summary>
+        /// Config de génération procédurale. Null = home planet (constantes par défaut).
+        /// Assignée par InfinitePlanetSystem avant que Start() s'exécute.
+        /// </summary>
+        [System.NonSerialized] public PlanetGenerationConfig? generationConfig = null;
+
+        /// <summary>
+        /// Si true, Start() ne lance pas UpdateChunks() (InfinitePlanetSystem
+        /// démarre le chargement async lui-même).
+        /// </summary>
+        [System.NonSerialized] public bool manualLoad = false;
+
+        // ── État interne ───────────────────────────────────────────
         private readonly Dictionary<FaceChunkCoord, ChunkRenderer> _chunks
             = new Dictionary<FaceChunkCoord, ChunkRenderer>();
 
         private Transform _viewer;          // non utilisé pour le spawning, gardé pour l'API
         private bool _planetLoaded = false; // évite de respawner tous les chunks à chaque frame
+
+        /// <summary>Vrai quand tous les chunks sont chargés.</summary>
+        public bool IsFullyLoaded => _planetLoaded;
 
         // ── API publique ──────────────────────────────────────
 
@@ -75,9 +93,9 @@ namespace AstroVoxel.VoxelEngine
             if (_planetLoaded) return;
 
             int   cs       = VoxelData.ChunkWidth;
-            float coreR    = PlanetChunkGenerator.PlanetCoreRadius;
-            float amp      = PlanetChunkGenerator.SurfaceAmplitude;
-            float crust    = PlanetChunkGenerator.CrustThickness;
+            float coreR    = generationConfig.HasValue ? generationConfig.Value.CoreRadius    : PlanetChunkGenerator.PlanetCoreRadius;
+            float amp      = generationConfig.HasValue ? generationConfig.Value.SurfaceAmplitude : PlanetChunkGenerator.SurfaceAmplitude;
+            float crust    = generationConfig.HasValue ? generationConfig.Value.CrustThickness   : PlanetChunkGenerator.CrustThickness;
             float halfDiag = cs * 0.8660254f;   // √3/2 * cs
             float shellMax = coreR + amp + 2f + halfDiag;
             float shellMin = coreR - crust - halfDiag;
@@ -233,19 +251,85 @@ namespace AstroVoxel.VoxelEngine
             go.transform.rotation = rot;
 
             var mr = go.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = (blockMaterials != null && blockMaterials.Length > 0 && blockMaterials[0] != null)
-                ? blockMaterials[0]
-                : new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            if (blockMaterials != null && blockMaterials.Length > 0 && blockMaterials[0] != null)
+            {
+                mr.sharedMaterial = blockMaterials[0];
+            }
+            else
+            {
+                var sh = Shader.Find("AstroVoxel/BlockUnlit")
+                      ?? Shader.Find("Universal Render Pipeline/Unlit")
+                      ?? Shader.Find("Unlit/Texture");
+                mr.sharedMaterial = new Material(sh);
+            }
 
             var cr = go.AddComponent<ChunkRenderer>();
-            cr.InitFromWorld(origin, PlanetCenter, this, rot, coord.Face, blockMaterials);
+            cr.InitFromWorld(origin, PlanetCenter, this, rot, coord.Face, blockMaterials,
+                             null, null, true, generationConfig);
 
             _chunks[coord] = cr;
         }
 
+        // ── Chargement async (pour planètes distantes) ────────────
+
+        /// <summary>
+        /// Charge les chunks progressivement sur plusieurs frames.
+        /// Utilisé par InfinitePlanetSystem pour éviter les gels.
+        /// </summary>
+        public IEnumerator LoadChunksAsync(int chunksPerFrame = 6)
+        {
+            if (_planetLoaded) yield break;
+
+            int   cs       = VoxelData.ChunkWidth;
+            float coreR    = generationConfig.HasValue ? generationConfig.Value.CoreRadius      : PlanetChunkGenerator.PlanetCoreRadius;
+            float amp      = generationConfig.HasValue ? generationConfig.Value.SurfaceAmplitude : PlanetChunkGenerator.SurfaceAmplitude;
+            float crust    = generationConfig.HasValue ? generationConfig.Value.CrustThickness   : PlanetChunkGenerator.CrustThickness;
+
+            float halfDiag = cs * 0.8660254f;
+            float shellMax = coreR + amp + 2f + halfDiag;
+            float shellMin = coreR - crust - halfDiag;
+
+            float step = cs * 0.5f;
+            int   maxS = Mathf.CeilToInt(shellMax / step) + 2;
+
+            int spawned = 0;
+            for (int dz = -maxS; dz <= maxS; dz++)
+            for (int dy = -maxS; dy <= maxS; dy++)
+            for (int dx = -maxS; dx <= maxS; dx++)
+            {
+                float fx = (dx + 0.5f) * step;
+                float fy = (dy + 0.5f) * step;
+                float fz = (dz + 0.5f) * step;
+                float dist = Mathf.Sqrt(fx * fx + fy * fy + fz * fz);
+
+                if (dist > shellMax || dist < shellMin) continue;
+
+                var sample = new Vector3(fx, fy, fz);
+                FaceIndex fi2 = SphereFace.GetFace(sample);
+                int f2 = (int)fi2;
+
+                int U = Mathf.FloorToInt(Vector3.Dot(sample, SphereFace.Rights  [f2]) / cs);
+                int V = Mathf.FloorToInt(Vector3.Dot(sample, SphereFace.Forwards[f2]) / cs);
+                int R = Mathf.FloorToInt(Vector3.Dot(sample, SphereFace.Normals [f2]) / cs);
+
+                var coord = new FaceChunkCoord(fi2, U, V, R);
+                if (!_chunks.ContainsKey(coord))
+                {
+                    SpawnChunk(coord);
+                    spawned++;
+                    if (spawned % chunksPerFrame == 0) yield return null;
+                }
+            }
+
+            _planetLoaded = true;
+        }
+
         // ── Cycle de vie ──────────────────────────────────────
 
-        private void Start()  => UpdateChunks();
+        private void Start()
+        {
+            if (!manualLoad) UpdateChunks();
+        }
         private void Update() { /* chunks statiques ; rien à faire chaque frame */ }
     }
 }

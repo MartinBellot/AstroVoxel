@@ -12,6 +12,7 @@ using AstroVoxel.Physics;
 using AstroVoxel.Player;
 using AstroVoxel.Environment;
 using AstroVoxel.Vehicle;
+using AstroVoxel.Space;
 
 namespace AstroVoxel.Bootstrap
 {
@@ -35,6 +36,9 @@ namespace AstroVoxel.Bootstrap
 
         private void Awake()
         {
+            // ── Seed globale du monde ─────────────────────────
+            WorldSeedManager.Initialize();  // aléatoire au premier lancement, conservée après /restart
+
             // ── Skybox spatiale ───────────────────────────────
             BuildEnvironment();
 
@@ -54,6 +58,9 @@ namespace AstroVoxel.Bootstrap
 
             // Système d'astéroïdes et météorites
             BuildAsteroidSystem(playerBody, builtMaterials, sunOrbit);
+
+            // Système de planètes infinies
+            BuildInfinitePlanets(playerBody, builtMaterials);
 
             world.SetViewer(playerBody);
 
@@ -103,8 +110,10 @@ namespace AstroVoxel.Bootstrap
             planetGO.AddComponent<OzoneLayer>();
 
             world = planetGO.AddComponent<PlanetWorld>();
-            world.planetRadius    = planetRadius;
-            world.blockMaterials  = builtMaterials;
+            world.planetRadius       = planetRadius;
+            world.blockMaterials     = builtMaterials;
+            // Applique la config seed-based pour que le terrain change avec la seed
+            world.generationConfig   = PlanetGenerationConfig.HomePlanet(WorldSeedManager.Seed);
         }
 
         /// <summary>
@@ -446,6 +455,15 @@ namespace AstroVoxel.Bootstrap
                 : Vector3.right * 800f;
 
             mgr.Init(player, blockMaterials, sunPos);
+        }
+
+        // ── Système de planètes infinies ──────────────────────
+
+        private static void BuildInfinitePlanets(Transform player, Material[] blockMaterials)
+        {
+            var go  = new GameObject("InfinitePlanetSystem");
+            var sys = go.AddComponent<InfinitePlanetSystem>();
+            sys.Init(player, blockMaterials);
         }
     }
 }
