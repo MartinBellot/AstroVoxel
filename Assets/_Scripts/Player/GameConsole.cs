@@ -481,11 +481,11 @@ namespace AstroVoxel.Player
             _scroll.scrollSensitivity = 40f;
             _scroll.movementType      = ScrollRect.MovementType.Clamped;
 
-            // Viewport with mask
+            // Viewport with mask — RectMask2D ne nécessite pas d'Image(Color.clear)
+            // qui bloquerait le rendu de tout le contenu via le stencil buffer.
             var vpGO = new GameObject("Viewport");
             vpGO.transform.SetParent(scrollGO.transform, false);
-            vpGO.AddComponent<Image>().color = Color.clear;
-            vpGO.AddComponent<Mask>().showMaskGraphic = false;
+            vpGO.AddComponent<RectMask2D>();
             var vpRT = vpGO.GetComponent<RectTransform>();
             vpRT.anchorMin        = Vector2.zero;
             vpRT.anchorMax        = Vector2.one;
