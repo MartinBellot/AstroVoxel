@@ -67,6 +67,10 @@ namespace AstroVoxel.Environment
         private float     _angle;
         private Transform _player;
 
+        /// <summary>Direction monde normalisée du centre planétaire vers le soleil (orbitale).
+        /// Indépendante de la position visuelle de _sunBody → correcte même à l'infini.</summary>
+        private Vector3   _sunOrbitDir = Vector3.right;
+
         // ── Propriétés publiques ──────────────────────────────
 
         /// <summary>
@@ -77,17 +81,15 @@ namespace AstroVoxel.Environment
         {
             get
             {
-                if (_player == null || _sunBody == null) return 1f;
-                // La planète est toujours à l'origine (Vector3.zero)
-                Vector3 sunDir    = _sunBody.position.normalized;
+                if (_player == null) return 1f;
+                // Utilise la direction orbitale réelle — indépendante de la position visuelle
                 Vector3 playerDir = _player.position.normalized;
-                return Vector3.Dot(sunDir, playerDir);
+                return Vector3.Dot(_sunOrbitDir, playerDir);
             }
         }
 
         /// <summary>Direction normalisée du centre planétaire vers le soleil.</summary>
-        public Vector3 SunDirection =>
-            _sunBody != null ? _sunBody.position.normalized : Vector3.right;
+        public Vector3 SunDirection => _sunOrbitDir;
 
         // ── API publique ──────────────────────────────────────
 
@@ -127,12 +129,41 @@ namespace AstroVoxel.Environment
                 0f,
                 Mathf.Sin(rad) * orbitRadius);
 
-            // Lumière : du soleil vers le centre planétaire (origine)
-            Vector3 toCenter = -_sunBody.position;
-            if (toCenter.sqrMagnitude > 0.01f)
-                _sunLight.transform.rotation = Quaternion.LookRotation(toCenter.normalized);
+            // Stocker la direction orbitale AVANT de déplacer le corps visuel dans LateUpdate
+            _sunOrbitDir = (_sunBody.position - transform.position).normalized;
+            if (_sunOrbitDir.sqrMagnitude < 0.01f) _sunOrbitDir = Vector3.right;
+
+            // Lumière directionnelle : utilise la direction orbitale réelle
+            _sunLight.transform.rotation = Quaternion.LookRotation(-_sunOrbitDir);
 
             UpdateDayNightCycle();
+        }
+
+        // ── Positionnement caméra-relatif (rendu à l'infini) ──
+
+        /// <summary>
+        /// Replace le corps visuel du soleil proche de la caméra active tout en
+        /// conservant la direction orbitale. Garantit la visibilité depuis n'importe
+        /// quelle distance sans modifier la lumière directionnelle ni le cycle j/n.
+        /// </summary>
+        private void LateUpdate()
+        {
+            // Cherche la caméra active (joueur ou vaisseau)
+            Camera cam = null;
+            foreach (var c in Camera.allCameras)
+            {
+                if (c != null && c.isActiveAndEnabled) { cam = c; break; }
+            }
+            if (cam == null) cam = Camera.main;
+            if (cam == null) return;
+
+            // Place le soleil à mi-chemin du far clip dans la direction orbitale
+            float renderDist = cam.farClipPlane * 0.5f;
+            _sunBody.position = cam.transform.position + _sunOrbitDir * renderDist;
+
+            // Échelle proportionnelle pour conserver la taille angulaire d'origine
+            float s = renderDist / orbitRadius;
+            _sunBody.localScale = new Vector3(s, s, s);
         }
 
         // ── Cycle jour / nuit ─────────────────────────────────

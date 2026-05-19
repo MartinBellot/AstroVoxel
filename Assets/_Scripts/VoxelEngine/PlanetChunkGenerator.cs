@@ -144,7 +144,9 @@ namespace AstroVoxel.VoxelEngine
         /// Les blocs proches de la frontière entre deux faces sont générés par les
         /// DEUX face chunks adjacents pour éviter la tranchée de couture.
         /// Valeur calibrée : diff réel observé ≈ 0.005–0.04 aux frontières.
-        /// Une marge de 0.05 couvre ~2.5 voxels à r=50, fermant toute tranchée.
+        /// Une marge trop grande (≥0.05) provoque des blocs dupliqués entre deux face-chunks
+        /// adjacents → z-fighting (clignotements). 0.025 couvre la précision FP sans
+        /// overlap visible : ~1.2 voxels à r=50, suffit pour fermer les coutures.
         /// </summary>
         private const float kSeamMargin = 0.10f;
 
@@ -382,6 +384,7 @@ namespace AstroVoxel.VoxelEngine
         // ═══════════════════════════════════════════════════════
 
         // ── Masque de couture (partagé) ───────────────────────
+        // Voir kSeamMargin : 0.10 = marge large pour refermer toutes les coutures.
         private const float kSeamMarginCfg = 0.10f;
 
         /// <summary>
@@ -422,7 +425,7 @@ namespace AstroVoxel.VoxelEngine
 
             // Surface (top block)
             if (dist > surfaceRadius - 0.5f)
-                return cave ? (byte)BlockType.Air : GetSurfaceBlock(cfg.Biome, worldPos, so);
+                return cave ? (byte)BlockType.Air : GetSurfaceBlock(cfg.Biome, worldPos, so, noise);
 
             // Sub-surface (~2-3 blocs)
             if (dist > surfaceRadius - 3.5f)
@@ -478,29 +481,97 @@ namespace AstroVoxel.VoxelEngine
 
         // ── Blocs de surface par biome ────────────────────────
 
-        private static byte GetSurfaceBlock(PlanetBiome biome, Vector3 pos, float so)
+        private static byte GetSurfaceBlock(PlanetBiome biome, Vector3 pos, float so, float altNoise)
         {
+            // Bruit auxiliaire haute fréquence pour patches.
+            // Calculé à la demande seulement quand le biome en a besoin (early-out).
             switch (biome)
             {
-                case PlanetBiome.Terran:   return (byte)BlockType.Grass;
+                case PlanetBiome.Terran:
+                {
+                    // Plaines herbeuses, ponctuées de mousse et de podzol à basse altitude.
+                    float p = Mathf.PerlinNoise(pos.x * 0.07f + so + 11f, pos.z * 0.07f + so + 11f);
+                    if (altNoise < 0.30f && p > 0.65f) return (byte)BlockType.MossBlock;
+                    if (p > 0.82f) return (byte)BlockType.Podzol;
+                    return (byte)BlockType.Grass;
+                }
                 case PlanetBiome.Desert:
-                    // Mix sable / sable rouge selon bruit
-                    return Mathf.PerlinNoise(pos.x * 0.05f + so, pos.z * 0.05f + so) > 0.65f
-                        ? (byte)BlockType.RedSand
-                        : (byte)BlockType.Sand;
-                case PlanetBiome.Snow:     return (byte)BlockType.PackedIce;
-                case PlanetBiome.Volcanic: return (byte)BlockType.Netherrack;
-                case PlanetBiome.Forest:   return (byte)BlockType.Grass;
+                {
+                    // Mix sable / sable rouge + croûtes de grès aux crêtes des dunes.
+                    float p = Mathf.PerlinNoise(pos.x * 0.05f + so, pos.z * 0.05f + so);
+                    if (altNoise > 0.78f) return (byte)BlockType.Sandstone;     // crête dune
+                    return p > 0.65f ? (byte)BlockType.RedSand : (byte)BlockType.Sand;
+                }
+                case PlanetBiome.Snow:
+                {
+                    // Manteau de neige avec patches de glace bleue.
+                    float p = Mathf.PerlinNoise(pos.x * 0.06f + so + 33f, pos.z * 0.06f + so + 33f);
+                    if (p > 0.78f) return (byte)BlockType.BlueIce;
+                    if (p > 0.55f) return (byte)BlockType.PackedIce;
+                    return (byte)BlockType.Snow;
+                }
+                case PlanetBiome.Volcanic:
+                {
+                    // Surface volcanique : netherrack / basalte / magma brûlant.
+                    float p = Mathf.PerlinNoise(pos.x * 0.09f + so + 17f, pos.z * 0.09f + so + 17f);
+                    if (p > 0.85f) return (byte)BlockType.MagmaBlock;           // brûlures
+                    if (p > 0.55f) return (byte)BlockType.Basalt;                // coulées refroidies
+                    return (byte)BlockType.Netherrack;
+                }
+                case PlanetBiome.Forest:
+                {
+                    // Forêt humide : herbe + podzol + mousse éparses.
+                    float p = Mathf.PerlinNoise(pos.x * 0.08f + so + 55f, pos.z * 0.08f + so + 55f);
+                    if (p > 0.78f) return (byte)BlockType.MossBlock;
+                    if (p > 0.55f) return (byte)BlockType.Podzol;
+                    return (byte)BlockType.Grass;
+                }
                 case PlanetBiome.Mountain:
-                    // Pierre nue au sommet, herbe plus bas
-                    return Mathf.PerlinNoise(pos.x * 0.04f + so, pos.z * 0.04f + so) > 0.55f
-                        ? (byte)BlockType.Stone
-                        : (byte)BlockType.Grass;
-                case PlanetBiome.Endstone: return (byte)BlockType.EndStone;
-                case PlanetBiome.Crystal:  return (byte)BlockType.QuartzBricks;
-                case PlanetBiome.Nether:   return (byte)BlockType.Netherrack;
-                case PlanetBiome.Cherry:   return (byte)BlockType.Grass;
-                case PlanetBiome.Mossy:    return (byte)BlockType.MossyCobblestone;
+                {
+                    // Bas = herbe → cailloux → sommets enneigés.
+                    if (altNoise > 0.78f) return (byte)BlockType.Snow;            // pic enneigé
+                    if (altNoise > 0.62f) return (byte)BlockType.Stone;           // pierre nue
+                    float p = Mathf.PerlinNoise(pos.x * 0.06f + so + 7f, pos.z * 0.06f + so + 7f);
+                    if (p > 0.70f) return (byte)BlockType.Andesite;
+                    return (byte)BlockType.Grass;
+                }
+                case PlanetBiome.Endstone:
+                {
+                    float p = Mathf.PerlinNoise(pos.x * 0.10f + so + 22f, pos.z * 0.10f + so + 22f);
+                    if (p > 0.80f) return (byte)BlockType.PurpurBlock;
+                    return (byte)BlockType.EndStone;
+                }
+                case PlanetBiome.Crystal:
+                {
+                    // Quartz/Améthyste/Calcite.
+                    float p = Mathf.PerlinNoise(pos.x * 0.08f + so + 44f, pos.z * 0.08f + so + 44f);
+                    if (p > 0.82f) return (byte)BlockType.AmethystBlock;
+                    if (p > 0.55f) return (byte)BlockType.Calcite;
+                    return (byte)BlockType.QuartzBricks;
+                }
+                case PlanetBiome.Nether:
+                {
+                    float p = Mathf.PerlinNoise(pos.x * 0.07f + so + 66f, pos.z * 0.07f + so + 66f);
+                    if (p > 0.85f) return (byte)BlockType.Glowstone;             // lueur
+                    if (p > 0.65f) return (byte)BlockType.NetherWartBlock;       // tapis cramoisi
+                    if (p > 0.40f) return (byte)BlockType.SoulSand;
+                    return (byte)BlockType.Netherrack;
+                }
+                case PlanetBiome.Cherry:
+                {
+                    // Herbe avec patches de terre racinaire (rooted dirt) sous les arbres.
+                    float p = Mathf.PerlinNoise(pos.x * 0.09f + so + 88f, pos.z * 0.09f + so + 88f);
+                    if (p > 0.75f) return (byte)BlockType.RootedDirt;
+                    return (byte)BlockType.Grass;
+                }
+                case PlanetBiome.Mossy:
+                {
+                    // Tapis de mousse dominant, avec patches de pierre mousseuse.
+                    float p = Mathf.PerlinNoise(pos.x * 0.08f + so + 99f, pos.z * 0.08f + so + 99f);
+                    if (p > 0.75f) return (byte)BlockType.MossyCobblestone;
+                    if (p > 0.50f) return (byte)BlockType.MossyStoneBricks;
+                    return (byte)BlockType.MossBlock;
+                }
                 default:                   return (byte)BlockType.Grass;
             }
         }
@@ -511,15 +582,15 @@ namespace AstroVoxel.VoxelEngine
             {
                 case PlanetBiome.Terran:   return (byte)BlockType.Dirt;
                 case PlanetBiome.Desert:   return (byte)BlockType.Sandstone;
-                case PlanetBiome.Snow:     return (byte)BlockType.BlueIce;
+                case PlanetBiome.Snow:     return (byte)BlockType.PackedIce;
                 case PlanetBiome.Volcanic: return (byte)BlockType.Blackstone;
-                case PlanetBiome.Forest:   return (byte)BlockType.Dirt;
-                case PlanetBiome.Mountain: return (byte)BlockType.Granite;
+                case PlanetBiome.Forest:   return (byte)BlockType.RootedDirt;
+                case PlanetBiome.Mountain: return (byte)BlockType.Tuff;
                 case PlanetBiome.Endstone: return (byte)BlockType.EndStone;
-                case PlanetBiome.Crystal:  return (byte)BlockType.PurpurBlock;
-                case PlanetBiome.Nether:   return (byte)BlockType.SoulSand;
+                case PlanetBiome.Crystal:  return (byte)BlockType.Calcite;
+                case PlanetBiome.Nether:   return (byte)BlockType.SoulSoil;
                 case PlanetBiome.Cherry:   return (byte)BlockType.CoarseDirt;
-                case PlanetBiome.Mossy:    return (byte)BlockType.MossyStoneBricks;
+                case PlanetBiome.Mossy:    return (byte)BlockType.RootedDirt;
                 default:                   return (byte)BlockType.Dirt;
             }
         }
@@ -531,14 +602,14 @@ namespace AstroVoxel.VoxelEngine
                 case PlanetBiome.Terran:   return (byte)BlockType.Stone;
                 case PlanetBiome.Desert:   return (byte)BlockType.RedSandstone;
                 case PlanetBiome.Snow:     return (byte)BlockType.Stone;
-                case PlanetBiome.Volcanic: return (byte)BlockType.Obsidian;
+                case PlanetBiome.Volcanic: return (byte)BlockType.Basalt;
                 case PlanetBiome.Forest:   return (byte)BlockType.Stone;
                 case PlanetBiome.Mountain: return (byte)BlockType.Andesite;
                 case PlanetBiome.Endstone: return (byte)BlockType.PurpurBlock;
                 case PlanetBiome.Crystal:  return (byte)BlockType.Deepslate;
                 case PlanetBiome.Nether:   return (byte)BlockType.Blackstone;
                 case PlanetBiome.Cherry:   return (byte)BlockType.Stone;
-                case PlanetBiome.Mossy:    return (byte)BlockType.Cobblestone;
+                case PlanetBiome.Mossy:    return (byte)BlockType.Dripstone;
                 default:                   return (byte)BlockType.Stone;
             }
         }
@@ -662,6 +733,24 @@ namespace AstroVoxel.VoxelEngine
                 Vector3 searchBase = FindSurfaceBlockBiome(planetCenter, up, in cfg);
                 if (searchBase == Vector3.positiveInfinity) continue;
 
+                // ── Dispatch par biome : forme de structure spécifique ──
+                switch (cfg.Biome)
+                {
+                    case PlanetBiome.Desert:
+                        PlaceCactus(data, chunkOrigin, chunkRotation, searchBase, up, hash);
+                        continue;
+                    case PlanetBiome.Crystal:
+                        PlaceAmethystPillar(data, chunkOrigin, chunkRotation, searchBase, up, hash);
+                        continue;
+                    case PlanetBiome.Mossy:
+                    case PlanetBiome.Nether:
+                        PlaceGiantMushroom(data, chunkOrigin, chunkRotation, searchBase, up, hash, cfg.Biome);
+                        continue;
+                    case PlanetBiome.Volcanic:
+                        PlaceObsidianPillar(data, chunkOrigin, chunkRotation, searchBase, up, hash);
+                        continue;
+                }
+
                 int trunkH  = MinTrunkHeight + (int)((uint)hash >> 4)  % (MaxTrunkHeight  - MinTrunkHeight  + 1);
                 int canopyR = MinCanopyRadius + (int)((uint)hash >> 8)  % (MaxCanopyRadius - MinCanopyRadius + 1);
 
@@ -669,6 +758,18 @@ namespace AstroVoxel.VoxelEngine
                 if (cfg.Biome == PlanetBiome.Forest)
                 {
                     trunkH  = 5 + (int)((uint)hash >> 4) % 5;
+                    canopyR = 3 + (int)((uint)hash >> 8) % 2;
+                }
+                // Pins de montagne : grands et fins
+                else if (cfg.Biome == PlanetBiome.Mountain)
+                {
+                    trunkH  = 6 + (int)((uint)hash >> 4) % 4;
+                    canopyR = 2;
+                }
+                // Cerisiers : canopée large et basse
+                else if (cfg.Biome == PlanetBiome.Cherry)
+                {
+                    trunkH  = 4 + (int)((uint)hash >> 4) % 3;
                     canopyR = 3 + (int)((uint)hash >> 8) % 2;
                 }
 
@@ -723,16 +824,17 @@ namespace AstroVoxel.VoxelEngine
                     leaf = (byte)BlockType.JungleLeaves;
                     break;
                 case PlanetBiome.Mountain:
-                    log  = (byte)BlockType.Wood;
-                    leaf = (byte)BlockType.Leaves;
+                    // Pins p\u00e2les des montagnes
+                    log  = (byte)BlockType.PaleOakLog;
+                    leaf = (byte)BlockType.PaleOakLeaves;
                     break;
                 case PlanetBiome.Cherry:
                     log  = (byte)BlockType.CherryLog;
                     leaf = (byte)BlockType.CherryLeaves;
                     break;
                 case PlanetBiome.Mossy:
-                    log  = (byte)BlockType.DarkOakLog;
-                    leaf = (byte)BlockType.DarkOakLeaves;
+                    log  = (byte)BlockType.MushroomStem;
+                    leaf = (byte)BlockType.RedMushroomBlock;
                     break;
                 default:
                     log  = (byte)BlockType.Wood;
@@ -741,7 +843,7 @@ namespace AstroVoxel.VoxelEngine
             }
         }
 
-        /// <summary>Cherche la surface dans un biome donné.</summary>
+        /// <summary>Cherche la surface dans un biome donné : premier bloc non-Air en descente radiale.</summary>
         private static Vector3 FindSurfaceBlockBiome(
             Vector3 planetCenter, Vector3 up, in PlanetGenerationConfig cfg)
         {
@@ -752,14 +854,117 @@ namespace AstroVoxel.VoxelEngine
             {
                 Vector3 worldPos = planetCenter + up * r;
                 byte bt = GetBlockType(worldPos, planetCenter, in cfg);
-                // Surface = premier bloc solide non-sous-sol (herbe ou équivalent)
-                if (bt != (byte)BlockType.Air && bt != (byte)BlockType.Dirt
-                    && bt != (byte)BlockType.Stone && bt != (byte)BlockType.Deepslate
-                    && bt != (byte)BlockType.Andesite && bt != (byte)BlockType.Granite
-                    && bt != (byte)BlockType.Sandstone && bt != (byte)BlockType.RedSandstone)
-                    return worldPos;
+                if (bt == (byte)BlockType.Air) continue;
+                // Évite de pousser sur la pierre nue (sommets, falaises) : pas de végétation.
+                if (bt == (byte)BlockType.Stone     || bt == (byte)BlockType.Andesite ||
+                    bt == (byte)BlockType.Granite   || bt == (byte)BlockType.Diorite  ||
+                    bt == (byte)BlockType.Calcite   || bt == (byte)BlockType.Tuff     ||
+                    bt == (byte)BlockType.Snow      || bt == (byte)BlockType.PackedIce ||
+                    bt == (byte)BlockType.BlueIce   || bt == (byte)BlockType.MagmaBlock ||
+                    bt == (byte)BlockType.Basalt)
+                    return Vector3.positiveInfinity;
+                return worldPos;
             }
             return Vector3.positiveInfinity;
+        }
+
+        // ═════════════════════════════════════════════════════
+        //  STRUCTURES SPÉCIALES PAR BIOME
+        //  Toutes les fonctions sont allocation-free et utilisent
+        //  TrySetBlock (déjà optimisé : invRot par bloc).
+        // ═════════════════════════════════════════════════════
+
+        /// <summary>Cactus du désert : colonne 3-5 blocs, parfois avec un bras latéral.</summary>
+        private static void PlaceCactus(
+            ChunkData data, Vector3 chunkOrigin, Quaternion chunkRotation,
+            Vector3 baseBlock, Vector3 up, int hash)
+        {
+            int h = 3 + (int)((uint)hash >> 4) % 3;   // 3..5
+            for (int i = 0; i < h; i++)
+            {
+                int tx = Mathf.FloorToInt(baseBlock.x + up.x * i);
+                int ty = Mathf.FloorToInt(baseBlock.y + up.y * i);
+                int tz = Mathf.FloorToInt(baseBlock.z + up.z * i);
+                TrySetBlock(data, chunkOrigin, tx, ty, tz, (byte)BlockType.Cactus, overwrite: true, chunkRotation);
+            }
+        }
+
+        /// <summary>Pilier d'améthyste : 2-4 blocs, sommet plus large (cluster).</summary>
+        private static void PlaceAmethystPillar(
+            ChunkData data, Vector3 chunkOrigin, Quaternion chunkRotation,
+            Vector3 baseBlock, Vector3 up, int hash)
+        {
+            int h = 2 + (int)((uint)hash >> 4) % 3;   // 2..4
+            for (int i = 0; i < h; i++)
+            {
+                int tx = Mathf.FloorToInt(baseBlock.x + up.x * i);
+                int ty = Mathf.FloorToInt(baseBlock.y + up.y * i);
+                int tz = Mathf.FloorToInt(baseBlock.z + up.z * i);
+                TrySetBlock(data, chunkOrigin, tx, ty, tz,
+                    (i == h - 1) ? (byte)BlockType.AmethystBlock : (byte)BlockType.Calcite,
+                    overwrite: true, chunkRotation);
+            }
+        }
+
+        /// <summary>Champignon géant : tronc MushroomStem + chapeau plat (disque) rouge ou brun.</summary>
+        private static void PlaceGiantMushroom(
+            ChunkData data, Vector3 chunkOrigin, Quaternion chunkRotation,
+            Vector3 baseBlock, Vector3 up, int hash, PlanetBiome biome)
+        {
+            int trunkH = 4 + (int)((uint)hash >> 4) % 3;   // 4..6
+            int capR   = 2 + (int)((uint)hash >> 8) % 2;   // 2..3
+
+            // Tronc
+            for (int i = 0; i < trunkH; i++)
+            {
+                int tx = Mathf.FloorToInt(baseBlock.x + up.x * i);
+                int ty = Mathf.FloorToInt(baseBlock.y + up.y * i);
+                int tz = Mathf.FloorToInt(baseBlock.z + up.z * i);
+                TrySetBlock(data, chunkOrigin, tx, ty, tz, (byte)BlockType.MushroomStem, overwrite: true, chunkRotation);
+            }
+
+            // Chapeau plat (disque) au sommet
+            byte capBlock = (biome == PlanetBiome.Nether)
+                ? (byte)BlockType.NetherWartBlock
+                : (((hash >> 12) & 1) == 0 ? (byte)BlockType.RedMushroomBlock : (byte)BlockType.BrownMushroomBlock);
+
+            Vector3 capCenter = new Vector3(
+                baseBlock.x + up.x * trunkH,
+                baseBlock.y + up.y * trunkH,
+                baseBlock.z + up.z * trunkH);
+
+            // Disque plat : 1 couche en haut + cap perpendiculaire à up
+            for (int lx = -capR; lx <= capR; lx++)
+            for (int ly = -1;    ly <= 0;    ly++)   // 2 couches d'épaisseur
+            for (int lz = -capR; lz <= capR; lz++)
+            {
+                int d2 = lx * lx + lz * lz;
+                if (d2 > capR * capR) continue;
+                // Bordure : champignon ; centre : ShroomLight (donne un éclat)
+                bool isRing = d2 > (capR - 1) * (capR - 1);
+                byte b = (ly == 0 && !isRing) ? (byte)BlockType.ShroomLight : capBlock;
+
+                int wx = Mathf.FloorToInt(capCenter.x) + lx;
+                int wy = Mathf.FloorToInt(capCenter.y) + ly;
+                int wz = Mathf.FloorToInt(capCenter.z) + lz;
+                TrySetBlock(data, chunkOrigin, wx, wy, wz, b, overwrite: false, chunkRotation);
+            }
+        }
+
+        /// <summary>Piliers volcaniques : colonnes d'obsidienne torturée surmontées de magma.</summary>
+        private static void PlaceObsidianPillar(
+            ChunkData data, Vector3 chunkOrigin, Quaternion chunkRotation,
+            Vector3 baseBlock, Vector3 up, int hash)
+        {
+            int h = 3 + (int)((uint)hash >> 4) % 4;   // 3..6
+            for (int i = 0; i < h; i++)
+            {
+                int tx = Mathf.FloorToInt(baseBlock.x + up.x * i);
+                int ty = Mathf.FloorToInt(baseBlock.y + up.y * i);
+                int tz = Mathf.FloorToInt(baseBlock.z + up.z * i);
+                byte b = (i == h - 1) ? (byte)BlockType.MagmaBlock : (byte)BlockType.Obsidian;
+                TrySetBlock(data, chunkOrigin, tx, ty, tz, b, overwrite: true, chunkRotation);
+            }
         }
     }
 }

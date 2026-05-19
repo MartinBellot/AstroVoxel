@@ -165,6 +165,10 @@ namespace AstroVoxel.Editor
                 case "spruce_leaves":
                     return new Color(0.380f, 0.600f, 0.380f);   // #619961
 
+                // ── Feuilles pâles (chêne pâle) — teinte gris-vert claire ──
+                case "pale_oak_leaves":
+                    return new Color(0.780f, 0.800f, 0.720f);
+
                 default:
                     return Color.white;
             }
@@ -176,12 +180,12 @@ namespace AstroVoxel.Editor
         /// </summary>
         private static bool IsUndefinedSlot(byte rid)
         {
-            // Plage des IDs réels (0-91) + face-variants (200-216) = définis.
-            // La plage 92-199 est réservée et non utilisée.
+            // Plage des IDs réels (0-107) + face-variants (200-220) = définis.
+            // Les plages 108-199 et >220 sont réservées et non utilisées.
             // Air (0) n'a pas de texture.
             if (rid == 0) return true;
-            if (rid > 91 && rid < 200) return true;
-            if (rid > 216) return true;
+            if (rid > 107 && rid < 200) return true;
+            if (rid > 220) return true;
             return false;
         }
 

@@ -192,7 +192,7 @@ namespace AstroVoxel.Bootstrap
 
             playerCam = cameraGO.AddComponent<Camera>();
             playerCam.nearClipPlane = 0.1f;
-            playerCam.farClipPlane  = 2000f;  // doit couvrir l'orbite solaire (800u + corona)
+            playerCam.farClipPlane  = 150_000f;  // doit couvrir toutes les planètes (ImpostorRange 80 000u)
             playerCam.fieldOfView   = 70f;
 
             // Active la post-processing URP (requis pour que Bloom/autres effets s'appliquent)
@@ -374,7 +374,7 @@ namespace AstroVoxel.Bootstrap
 
             var shipCam             = camGO.AddComponent<Camera>();
             shipCam.nearClipPlane   = 0.5f;
-            shipCam.farClipPlane    = 2000f;
+            shipCam.farClipPlane    = 150_000f;  // idem caméra joueur
             shipCam.fieldOfView     = 65f;
             shipCam.clearFlags      = CameraClearFlags.Skybox;
 

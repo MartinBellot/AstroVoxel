@@ -67,18 +67,34 @@ namespace AstroVoxel.Player
         {
             if (!Raycast(out RaycastHit hit)) return;
             Vector3 pos = hit.point - hit.normal * 0.5f;
+
+            // Astéroïde
             var ast = hit.collider?.GetComponentInParent<AstroVoxel.Space.AsteroidWorld>();
-            if (ast != null) ast.BreakBlock(pos);
-            else world?.BreakBlock(pos);
+            if (ast != null) { ast.BreakBlock(pos); return; }
+
+            // Planète infinie (PlanetWorld créé dynamiquement par InfinitePlanetSystem)
+            var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
+            if (pw != null) { pw.BreakBlock(pos); return; }
+
+            // Planète de base
+            world?.BreakBlock(pos);
         }
 
         private void TryPlaceBlock()
         {
             if (!Raycast(out RaycastHit hit)) return;
             Vector3 pos = hit.point + hit.normal * 0.5f;
+
+            // Astéroïde
             var ast = hit.collider?.GetComponentInParent<AstroVoxel.Space.AsteroidWorld>();
-            if (ast != null) ast.PlaceBlock(pos, blockToPlace);
-            else world?.PlaceBlock(pos, blockToPlace);
+            if (ast != null) { ast.PlaceBlock(pos, blockToPlace); return; }
+
+            // Planète infinie (PlanetWorld créé dynamiquement par InfinitePlanetSystem)
+            var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
+            if (pw != null) { pw.PlaceBlock(pos, blockToPlace); return; }
+
+            // Planète de base
+            world?.PlaceBlock(pos, blockToPlace);
         }
 
         // ── Raycast ───────────────────────────────────────────

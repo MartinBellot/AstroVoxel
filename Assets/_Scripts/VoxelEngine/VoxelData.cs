@@ -206,6 +206,24 @@ namespace AstroVoxel.VoxelEngine
         CopperBlock  = 90,
         AmethystBlock= 91,
 
+        // ── Blocs spéciaux biomes (cactus, magma, mousse, champignons…) ────
+        Cactus             = 92,   // multi-face (top/side/bottom)
+        MagmaBlock         = 93,   // surface volcanique
+        MossBlock          = 94,   // biome Mossy
+        MushroomStem       = 95,   // troncs des champignons géants
+        BrownMushroomBlock = 96,   // chapeau marron (forêts humides)
+        RedMushroomBlock   = 97,   // chapeau rouge (mossy/nether)
+        Snow               = 98,   // cap neigeux des sommets
+        Calcite            = 99,   // veines crystal/mountain
+        Tuff               = 100,  // sous-couches mountain
+        Basalt             = 101,  // surface volcanique alterne
+        Dripstone          = 102,  // grottes/sous-sol
+        RootedDirt         = 103,  // mossy/cherry
+        NetherWartBlock    = 104,  // nether
+        ShroomLight        = 105,  // points lumineux mossy/nether
+        PaleOakLog         = 106,  // arbres pâles cherry/mountain
+        PaleOakLeaves      = 107,
+
         // ── IDs de rendu internes (face-variants) ─────────────
         // Ces valeurs ne sont JAMAIS stockées dans les chunks.
         // Elles servent uniquement d'index de sous-mesh dans MeshData.
@@ -226,6 +244,10 @@ namespace AstroVoxel.VoxelEngine
         DeepslateTop      = 214,
         PodzolTop         = 215,
         PodzolBottom      = 216,
+        CactusTop         = 217,
+        CactusBottom      = 218,
+        BasaltTop         = 219,
+        PaleOakLogTop     = 220,
     }
 
     /// <summary>
@@ -235,7 +257,7 @@ namespace AstroVoxel.VoxelEngine
     {
         // Plage des IDs de blocs solides réels (stockés dans les chunks).
         private const byte SolidMin = 1;
-        private const byte SolidMax = 91;
+        private const byte SolidMax = 107;
 
         /// <summary>Retourne true si le bloc doit bloquer la génération des faces adjacentes.</summary>
         public static bool IsSolid(byte blockId) => blockId >= SolidMin && blockId <= SolidMax;

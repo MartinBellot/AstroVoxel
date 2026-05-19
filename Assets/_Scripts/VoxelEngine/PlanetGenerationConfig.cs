@@ -106,7 +106,8 @@ namespace AstroVoxel.VoxelEngine
                     cfg.SurfaceAmplitude  = coreRadius * 0.14f;
                     cfg.SurfaceFrequency  = 0.025f;   // grandes dunes
                     cfg.HasCaves          = false;
-                    cfg.HasTrees          = false;
+                    cfg.HasTrees          = true;     // cactus stacks
+                    cfg.TreeDensity       = 3;        // rares
                     break;
 
                 case PlanetBiome.Snow:
@@ -117,7 +118,8 @@ namespace AstroVoxel.VoxelEngine
                 case PlanetBiome.Volcanic:
                     cfg.SurfaceAmplitude      = coreRadius * 0.16f;
                     cfg.SurfaceFrequency      = 0.042f;
-                    cfg.HasTrees              = false;
+                    cfg.HasTrees              = true;     // piliers d'obsidienne brûlés (sparse)
+                    cfg.TreeDensity           = 3;        // très rares
                     cfg.CaveTubeRadius        = 0.14f;   // tunnels de lave larges
                     cfg.CavePresenceThreshold = 0.55f;   // grottes partout
                     break;
@@ -141,14 +143,16 @@ namespace AstroVoxel.VoxelEngine
 
                 case PlanetBiome.Crystal:
                     cfg.SurfaceAmplitude = coreRadius * 0.05f;
-                    cfg.HasTrees         = false;
+                    cfg.HasTrees         = true;          // piliers d'améthyste
+                    cfg.TreeDensity      = 3;             // rares
                     cfg.CaveTubeRadius   = 0.13f;
                     break;
 
                 case PlanetBiome.Nether:
                     cfg.SurfaceAmplitude      = coreRadius * 0.17f;
                     cfg.SurfaceFrequency      = 0.045f;
-                    cfg.HasTrees              = false;
+                    cfg.HasTrees              = true;     // champignons géants nether
+                    cfg.TreeDensity           = 2;
                     cfg.CaveTubeRadius        = 0.13f;
                     cfg.CavePresenceThreshold = 0.52f;
                     break;

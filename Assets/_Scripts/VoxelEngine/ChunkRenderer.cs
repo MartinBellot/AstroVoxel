@@ -277,8 +277,11 @@ namespace AstroVoxel.VoxelEngine
             }
 
             // Force le re-bake du MeshCollider.
+            // Si le mesh est vide (chunk entièrement creusé), on détache le collider
+            // pour éviter le warning "mesh doesn't have any vertices" de PhysX.
             _meshCollider.sharedMesh = null;
-            _meshCollider.sharedMesh = _mesh;
+            if (_meshData.Vertices.Count > 0)
+                _meshCollider.sharedMesh = _mesh;
         }
 
         // ── Nettoyage ─────────────────────────────────────────

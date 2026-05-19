@@ -148,6 +148,24 @@ namespace AstroVoxel.VoxelEngine
             Reg(BlockType.CopperBlock,        "copper_block",        "Bloc de Cuivre");
             Reg(BlockType.AmethystBlock,      "amethyst_block",      "Bloc d'Améthyste");
 
+            // ── Blocs spéciaux biomes ────────────────────────────
+            Reg(BlockType.Cactus,             "cactus_side",         "Cactus");          // face côtés
+            Reg(BlockType.MagmaBlock,         "magma",               "Bloc de Magma");
+            Reg(BlockType.MossBlock,          "moss_block",          "Bloc de Mousse");
+            Reg(BlockType.MushroomStem,       "mushroom_stem",       "Pied de Champignon");
+            Reg(BlockType.BrownMushroomBlock, "brown_mushroom_block","Chapeau Marron");
+            Reg(BlockType.RedMushroomBlock,   "red_mushroom_block",  "Chapeau Rouge");
+            Reg(BlockType.Snow,               "snow",                "Neige");
+            Reg(BlockType.Calcite,            "calcite",             "Calcite");
+            Reg(BlockType.Tuff,               "tuff",                "Tuf");
+            Reg(BlockType.Basalt,             "basalt_side",         "Basalte");         // face côtés
+            Reg(BlockType.Dripstone,          "dripstone_block",     "Roche Spéléothème");
+            Reg(BlockType.RootedDirt,         "rooted_dirt",         "Terre Racinaire");
+            Reg(BlockType.NetherWartBlock,    "nether_wart_block",   "Verrue du Nether");
+            Reg(BlockType.ShroomLight,        "shroomlight",         "Champilumière");
+            Reg(BlockType.PaleOakLog,         "pale_oak_log",        "Bûche de Chêne Pâle");
+            Reg(BlockType.PaleOakLeaves,      "pale_oak_leaves",     "Feuilles de Chêne Pâle");
+
             // ── Face-variants (IDs de rendu internes) ────────────
             // Ces entrées ont un nom de texture mais pas de nom d'affichage.
             RegTex(BlockType.GrassSide,          "grass_block_side");
@@ -167,6 +185,10 @@ namespace AstroVoxel.VoxelEngine
             RegTex(BlockType.DeepslateTop,       "deepslate_top");
             RegTex(BlockType.PodzolTop,          "podzol_top");
             RegTex(BlockType.PodzolBottom,       "dirt");
+            RegTex(BlockType.CactusTop,          "cactus_top");
+            RegTex(BlockType.CactusBottom,       "cactus_bottom");
+            RegTex(BlockType.BasaltTop,          "basalt_top");
+            RegTex(BlockType.PaleOakLogTop,      "pale_oak_log_top");
         }
 
         private static void Reg(BlockType t, string tex, string display)
@@ -243,6 +265,19 @@ namespace AstroVoxel.VoxelEngine
                     if (face == 1) return (byte)BlockType.PodzolBottom;
                     return blockId;   // côtés → podzol_side (texture du blockId)
 
+                case BlockType.Cactus:
+                    if (face == 0) return (byte)BlockType.CactusTop;
+                    if (face == 1) return (byte)BlockType.CactusBottom;
+                    return blockId;   // côtés → cactus_side
+
+                case BlockType.Basalt:
+                    if (face == 0 || face == 1) return (byte)BlockType.BasaltTop;
+                    return blockId;
+
+                case BlockType.PaleOakLog:
+                    if (face == 0 || face == 1) return (byte)BlockType.PaleOakLogTop;
+                    return blockId;
+
                 default:
                     return blockId;
             }
@@ -282,6 +317,9 @@ namespace AstroVoxel.VoxelEngine
                 case BlockType.RedSandstone: return (byte)BlockType.RedSandstoneTop;
                 case BlockType.Deepslate:    return (byte)BlockType.DeepslateTop;
                 case BlockType.Podzol:       return (byte)BlockType.PodzolTop;
+                case BlockType.Cactus:       return (byte)BlockType.CactusTop;
+                case BlockType.Basalt:       return (byte)BlockType.BasaltTop;
+                case BlockType.PaleOakLog:   return (byte)BlockType.PaleOakLogTop;
                 // Pour Grass, la face du dessus (blockId lui-même) est déjà grass_block_top
                 default: return blockId;
             }
@@ -360,6 +398,15 @@ namespace AstroVoxel.VoxelEngine
             (byte)BlockType.EmeraldBlock,  (byte)BlockType.LapisBlock,
             (byte)BlockType.RedstoneBlock, (byte)BlockType.NetheriteBlock,
             (byte)BlockType.CopperBlock,   (byte)BlockType.AmethystBlock,
+            // Nouveaux blocs biomes
+            (byte)BlockType.Cactus,           (byte)BlockType.MagmaBlock,
+            (byte)BlockType.MossBlock,        (byte)BlockType.MushroomStem,
+            (byte)BlockType.BrownMushroomBlock,(byte)BlockType.RedMushroomBlock,
+            (byte)BlockType.Snow,             (byte)BlockType.Calcite,
+            (byte)BlockType.Tuff,             (byte)BlockType.Basalt,
+            (byte)BlockType.Dripstone,        (byte)BlockType.RootedDirt,
+            (byte)BlockType.NetherWartBlock,  (byte)BlockType.ShroomLight,
+            (byte)BlockType.PaleOakLog,       (byte)BlockType.PaleOakLeaves,
         };
 
         // ── Couleur de repli (si la registry n'est pas encore construite) ─

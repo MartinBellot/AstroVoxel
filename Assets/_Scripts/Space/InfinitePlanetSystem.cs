@@ -38,15 +38,21 @@ namespace AstroVoxel.Space
         /// <summary>Distance max pour afficher l'impostor sphérique.</summary>
         public const float ImpostorRange   = 80000f;
 
-        /// <summary>Distance à partir de laquelle on charge les voxels.</summary>
-        public const float VoxelActivate   = 280f;
+        /// <summary>Marge AU-DESSUS du rayon pour déclencher le chargement voxel.
+        /// Le joueur ne devra plus traverser l'impostor : les voxels démarrent
+        /// bien avant.</summary>
+        public const float VoxelActivateBuffer   = 600f;
 
-        /// <summary>Distance à partir de laquelle on décharge les voxels.</summary>
-        public const float VoxelDeactivate = 450f;
+        /// <summary>Marge AU-DESSUS du rayon pour décharger les voxels (hystérésis).</summary>
+        public const float VoxelDeactivateBuffer = 900f;
 
         /// <summary>Rayon max pour le chargement voxel (au-delà = impostor uniquement).</summary>
         /// <remarks>Plus de limite : toutes les planètes peuvent charger des voxels.</remarks>
         public const float MaxVoxelRadius  = float.MaxValue;
+
+        /// <summary>Échelle visuelle de l'impostor par rapport au rayon réel.
+        /// 1.0 = la sphère colorée a la même taille que la planète voxel.</summary>
+        private const float ImpostorScale = 1.0f;
 
         /// <summary>Nombre de planètes dans le monde (assure l'infini en exploration).</summary>
         private const int PlanetCount = 512;
@@ -176,6 +182,45 @@ namespace AstroVoxel.Space
                     ImpostorColor = BiomeColors[(int)biome],
                 };
             }
+
+            // ── Anti-collision : relaxation par passes ────────
+            // Pousse les planètes qui se chevauchent pour éviter toute interpénétration.
+            // Marge large + plus de passes : aucune planète ne doit toucher visuellement.
+            // O(N²) sur N=512 → ~131k paires/passe ; 6 passes ≈ 800k tests : négligeable
+            // car ne s'exécute qu'UNE seule fois à l'init.
+            const float CollisionMargin = 400f;   // espace libre minimum entre deux surfaces
+            const int   RelaxPasses    = 6;
+            for (int pass = 0; pass < RelaxPasses; pass++)
+            {
+                for (int i = 0; i < _planets.Length; i++)
+                {
+                    for (int j = i + 1; j < _planets.Length; j++)
+                    {
+                        float minDist = _planets[i].Config.CoreRadius
+                                      + _planets[j].Config.CoreRadius
+                                      + CollisionMargin;
+                        Vector3 delta = _planets[j].Position - _planets[i].Position;
+                        float   dist  = delta.magnitude;
+                        if (dist < minDist && dist > 0.001f)
+                        {
+                            // Sépare les deux planètes symétriquement
+                            Vector3 push = delta * ((minDist - dist) * 0.5f / dist);
+                            _planets[i] = new PlanetData
+                            {
+                                Position      = _planets[i].Position - push,
+                                Config        = _planets[i].Config,
+                                ImpostorColor = _planets[i].ImpostorColor,
+                            };
+                            _planets[j] = new PlanetData
+                            {
+                                Position      = _planets[j].Position + push,
+                                Config        = _planets[j].Config,
+                                ImpostorColor = _planets[j].ImpostorColor,
+                            };
+                        }
+                    }
+                }
+            }
         }
 
         // ── Update principal ──────────────────────────────────
@@ -194,42 +239,63 @@ namespace AstroVoxel.Space
                 ? _activeCamera.transform.position
                 : _player.position;
 
-            int   closest  = -1;
-            float closestD = float.MaxValue;
+            // ── Hot loop optimisé : tout en distance² (zéro sqrt) ─
+            // 512 planètes × 1 sqMag + branches = ~quelques µs/frame.
+            const float impostorRangeSq = ImpostorRange * ImpostorRange;
+
+            int   closest    = -1;
+            float closestSqD = float.MaxValue;
+            float refX = refPos.x, refY = refPos.y, refZ = refPos.z;
 
             for (int i = 0; i < _planets.Length; i++)
             {
-                float d = Vector3.Distance(refPos, _planets[i].Position);
+                Vector3 p   = _planets[i].Position;
+                float   dx  = p.x - refX;
+                float   dy  = p.y - refY;
+                float   dz  = p.z - refZ;
+                float   sqd = dx * dx + dy * dy + dz * dz;
 
-                // Dessine l'impostor si dans la plage de visibilité
-                // et que ce n'est pas la planète actuellement chargée en voxels
-                if (d < ImpostorRange && !(_activeIndex == i && d < VoxelActivate))
+                // Seuil voxel-activate au carré (par planète)
+                float radius      = _planets[i].Config.CoreRadius;
+                float activateD   = radius + VoxelActivateBuffer;
+                float activateDSq = activateD * activateD;
+
+                // Dessine l'impostor si visible et que la planète voxel n'est pas
+                // déjà active à courte distance (évite le double-rendu).
+                if (sqd < impostorRangeSq && !(_activeIndex == i && sqd < activateDSq))
                 {
-                    float scale = _planets[i].Config.CoreRadius * 2.5f;
-                    int   bIdx  = (int)_planets[i].Config.Biome;
+                    int bIdx = (int)_planets[i].Config.Biome;
                     Graphics.DrawMesh(
                         _sphereMesh,
-                        Matrix4x4.TRS(_planets[i].Position, Quaternion.identity, Vector3.one * scale),
+                        Matrix4x4.TRS(p, Quaternion.identity, Vector3.one * (radius * ImpostorScale)),
                         _impostorMaterials[bIdx],
                         0);
                 }
 
-                // Trouve la planète la plus proche éligible pour voxels (toutes tailles)
-                if (d < closestD)
+                if (sqd < closestSqD)
                 {
-                    closestD = d;
-                    closest  = i;
+                    closestSqD = sqd;
+                    closest    = i;
                 }
             }
 
-            // ── Gestion de la planète voxel ───────────────────
-            if (closest >= 0 && closestD < VoxelActivate && closest != _activeIndex)
+            // ── Gestion de la planète voxel (par-planète, hystérésis) ─
+            if (closest >= 0)
             {
-                ActivateVoxelPlanet(closest);
-            }
-            else if (_activeIndex >= 0 && closestD > VoxelDeactivate)
-            {
-                DeactivateVoxelPlanet();
+                float closestR    = _planets[closest].Config.CoreRadius;
+                float actDist     = closestR + VoxelActivateBuffer;
+                float deactDist   = closestR + VoxelDeactivateBuffer;
+                float actSq       = actDist   * actDist;
+                float deactSq     = deactDist * deactDist;
+
+                if (closestSqD < actSq && closest != _activeIndex)
+                {
+                    ActivateVoxelPlanet(closest);
+                }
+                else if (_activeIndex >= 0 && closestSqD > deactSq)
+                {
+                    DeactivateVoxelPlanet();
+                }
             }
         }
 
@@ -368,19 +434,27 @@ namespace AstroVoxel.Space
         private void BuildImpostorMaterials()
         {
             _impostorMaterials = new Material[BiomeColors.Length];
-            // Utilise le shader custom du projet pour la cohérence visuelle
-            var shader = Shader.Find("AstroVoxel/BlockUnlit")
+            // Shader translucide dédié → impostors discrets, n'occultent ni le ciel
+            // ni les étoiles. Fallback compatible si introuvable.
+            var shader = Shader.Find("AstroVoxel/PlanetImpostor")
+                      ?? Shader.Find("AstroVoxel/BlockUnlit")
                       ?? Shader.Find("Universal Render Pipeline/Unlit")
-                      ?? Shader.Find("Unlit/Color")
-                      ?? Shader.Find("Diffuse");
+                      ?? Shader.Find("Unlit/Color");
+
+            // Alpha bas → sphère discrète, suggère un volume sans masquer
+            const float ImpostorAlpha = 0.32f;
 
             for (int i = 0; i < BiomeColors.Length; i++)
             {
+                var c = BiomeColors[i];
                 var mat = new Material(shader)
                 {
                     name = $"PlanetImpostor_{(PlanetBiome)i}"
                 };
-                mat.color = BiomeColors[i];
+                var tint = new Color(c.r, c.g, c.b, ImpostorAlpha);
+                mat.color = tint;
+                if (mat.HasProperty("_Color"))    mat.SetColor("_Color", tint);
+                if (mat.HasProperty("_RimColor")) mat.SetColor("_RimColor", Color.Lerp(c, Color.white, 0.6f));
                 _impostorMaterials[i] = mat;
             }
         }
