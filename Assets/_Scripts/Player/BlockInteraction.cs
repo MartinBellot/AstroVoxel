@@ -41,8 +41,8 @@ namespace AstroVoxel.Player
 
         private void Update()
         {
-            // Bloque toute interaction quand l'inventaire est ouvert
-            if (CreativeInventory.IsOpen) return;
+            // Bloque toute interaction quand l'inventaire ou la console est ouvert(e)
+            if (CreativeInventory.IsOpen || GameConsole.IsOpen) return;
 
             if (GetMouseDown(0))   // Clic gauche
                 TryBreakBlock();
@@ -224,6 +224,18 @@ namespace AstroVoxel.Player
         {
             if (slot >= 0 && slot < _hotbar.Length)
                 _hotbar[slot] = t;
+        }
+
+        /// <summary>
+        /// Vide tous les slots de la hotbar (Air).
+        /// Appelé par la console avec la commande /clear.
+        /// </summary>
+        public void ClearInventory()
+        {
+            for (int i = 0; i < _hotbar.Length; i++)
+                _hotbar[i] = BlockType.Air;
+            _hotbarIndex = 0;
+            blockToPlace = BlockType.Air;
         }
 
         /// <summary>Assigne les références depuis GameBootstrap.</summary>

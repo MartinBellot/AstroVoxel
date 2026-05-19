@@ -286,6 +286,12 @@ namespace AstroVoxel.Bootstrap
             invGO.transform.SetParent(canvasGO.transform, false);
             var inv = invGO.AddComponent<CreativeInventory>();
             inv.Init(canvas, blockInteract, builtMaterials, hud.HotbarSlotRects);
+
+            // Console de commandes (touche T ou /)
+            var consoleGO = new GameObject("GameConsole");
+            consoleGO.transform.SetParent(canvasGO.transform, false);
+            var console = consoleGO.AddComponent<GameConsole>();
+            console.Init(canvas, blockInteract);
         }
 
         // ── EventSystem ─────────────────────────────────────

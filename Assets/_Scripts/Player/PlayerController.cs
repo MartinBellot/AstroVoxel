@@ -91,7 +91,7 @@ namespace AstroVoxel.Player
 
         private void Update()
         {
-            if (CreativeInventory.IsOpen) return;
+            if (CreativeInventory.IsOpen || GameConsole.IsOpen) return;
 
             // Inputs événementiels : à lire dans Update.
             if (GetJumpDown() && _coyoteTimer > 0f && !_isCrouching)
@@ -100,9 +100,9 @@ namespace AstroVoxel.Player
 
         private void FixedUpdate()
         {
-            if (CreativeInventory.IsOpen)
+            if (CreativeInventory.IsOpen || GameConsole.IsOpen)
             {
-                // Stoppe le joueur si l'inventaire s'ouvre, conserve la gravité radiale.
+                // Stoppe le joueur si l'inventaire ou la console s'ouvre, conserve la gravité radiale.
                 StopHorizontal();
                 return;
             }
