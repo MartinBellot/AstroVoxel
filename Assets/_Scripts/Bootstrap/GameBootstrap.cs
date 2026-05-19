@@ -260,6 +260,9 @@ namespace AstroVoxel.Bootstrap
 
         private static void BuildHUD(BlockInteraction blockInteract, Transform playerBody, Material[] builtMaterials)
         {
+            // EventSystem (indispensable pour InputField, ScrollRect, EventTrigger…)
+            EnsureEventSystem();
+
             // Canvas Screen Space Overlay
             var canvasGO = new GameObject("HUD");
             var canvas   = canvasGO.AddComponent<Canvas>();
@@ -280,6 +283,21 @@ namespace AstroVoxel.Bootstrap
             invGO.transform.SetParent(canvasGO.transform, false);
             var inv = invGO.AddComponent<CreativeInventory>();
             inv.Init(canvas, blockInteract, builtMaterials, hud.HotbarSlotRects);
+        }
+
+        // ── EventSystem ─────────────────────────────────────
+
+        private static void EnsureEventSystem()
+        {
+            if (UnityEngine.EventSystems.EventSystem.current != null) return;
+
+            var esGO = new GameObject("EventSystem");
+            esGO.AddComponent<UnityEngine.EventSystems.EventSystem>();
+#if ENABLE_INPUT_SYSTEM
+            esGO.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+#else
+            esGO.AddComponent<UnityEngine.EventSystems.StandaloneInputModule>();
+#endif
         }
 
         // ── Construction du vaisseau spatial ─────────────────

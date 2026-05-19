@@ -105,6 +105,10 @@ namespace AstroVoxel.Player
             bool toggleE  = Input.GetKeyDown(KeyCode.E);
             bool pressEsc = Input.GetKeyDown(KeyCode.Escape);
 #endif
+            // Ignore le E quand la barre de recherche a le focus,
+            // sinon l'utilisateur ne peut jamais taper la lettre 'e'.
+            if (toggleE && IsSearchFocused()) toggleE = false;
+
             if (toggleE)
             {
                 if (IsOpen) Close();
@@ -114,6 +118,11 @@ namespace AstroVoxel.Player
             {
                 Close();
             }
+        }
+
+        private bool IsSearchFocused()
+        {
+            return _searchField != null && _searchField.isFocused;
         }
 
         private void Open()
@@ -293,6 +302,9 @@ namespace AstroVoxel.Player
             scroll.decelerationRate = 0.13f;
 
             // Viewport
+            // NB : on utilise RectMask2D plutôt que Mask+Image(Color.clear) :
+            // une Image avec alpha 0 n'est pas rendue, donc aucune valeur stencil
+            // n'est écrite et les enfants masqués deviennent invisibles.
             var vpGO = new GameObject("Viewport");
             vpGO.transform.SetParent(scrollGO.transform, false);
             var vpRT           = vpGO.AddComponent<RectTransform>();
@@ -300,9 +312,7 @@ namespace AstroVoxel.Player
             vpRT.anchorMax     = Vector2.one;
             vpRT.offsetMin     = Vector2.zero;
             vpRT.offsetMax     = new Vector2(-(ScrollBarW + 4f), 0f);
-            var vpMask         = vpGO.AddComponent<Mask>();
-            vpMask.showMaskGraphic = false;
-            vpGO.AddComponent<Image>().color = Color.clear;
+            vpGO.AddComponent<RectMask2D>();
             scroll.viewport    = vpRT;
 
             // Content

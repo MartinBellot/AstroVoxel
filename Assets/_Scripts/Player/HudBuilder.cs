@@ -43,6 +43,7 @@ namespace AstroVoxel.Player
         private Image[]    _slotBg;
         private Image[]    _slotRim;
         private RawImage[] _slotIcon;
+        private Color[]    _slotIconTint;   // teinte biome (vert herbe, feuillages…)
         private int        _visibleIndex = -1;
         private Material[]      _materials;
         private BlockType[]     _hotbarCache   = new BlockType[9];
@@ -159,6 +160,13 @@ namespace AstroVoxel.Player
                 {
                     _hotbarCache[i] = hotbar[i];
                     ApplyBlockColor(_slotIcon[i], hotbar[i], _materials);
+                    if (_slotIconTint != null && i < _slotIconTint.Length)
+                        _slotIconTint[i] = _slotIcon[i].color;
+                    // Réapplique immédiatement l'alpha sélection/non-sélection sur la nouvelle teinte
+                    bool selected = (i == _visibleIndex);
+                    var t = _slotIconTint != null && i < _slotIconTint.Length
+                        ? _slotIconTint[i] : Color.white;
+                    _slotIcon[i].color = new Color(t.r, t.g, t.b, selected ? 1f : 0.55f);
                 }
             }
 
@@ -184,7 +192,11 @@ namespace AstroVoxel.Player
             _slotRim[i].color = selected ? _accent : _border;
 
             if (_slotIcon != null && i < _slotIcon.Length)
-                _slotIcon[i].color = selected ? Color.white : new Color(1f, 1f, 1f, 0.55f);
+            {
+                var t = _slotIconTint != null && i < _slotIconTint.Length
+                    ? _slotIconTint[i] : Color.white;
+                _slotIcon[i].color = new Color(t.r, t.g, t.b, selected ? 1f : 0.55f);
+            }
         }
 
         // ─────────────────────────────────────────────────────
@@ -267,9 +279,10 @@ namespace AstroVoxel.Player
             hotbarBg.color = _bgDeep;
             MakeRounded(hotbarBg, radius);
 
-            _slotBg       = new Image[count];
-            _slotRim      = new Image[count];
-            _slotIcon     = new RawImage[count];
+            _slotBg        = new Image[count];
+            _slotRim       = new Image[count];
+            _slotIcon      = new RawImage[count];
+            _slotIconTint  = new Color[count];
             _hotbarSlotRTs = new RectTransform[count];
 
             float startX = -(totalW * 0.5f) + padding + slotSize * 0.5f;
@@ -304,7 +317,8 @@ namespace AstroVoxel.Player
 
                 var rawImg = iconGO.AddComponent<RawImage>();
                 ApplyBlockColor(rawImg, hotbar[i], blockMaterials);
-                _slotIcon[i] = rawImg;
+                _slotIcon[i]     = rawImg;
+                _slotIconTint[i] = rawImg.color;
                 if (i < _hotbarCache.Length) _hotbarCache[i] = hotbar[i];
 
                 // Numéro du slot (petit label en bas)
