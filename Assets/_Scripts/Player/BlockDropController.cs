@@ -16,7 +16,7 @@ namespace AstroVoxel.Player
     public sealed class BlockDropController : MonoBehaviour
     {
         // ── Config ────────────────────────────────────────────
-        private const float PickupRadius    = 2.0f;   // distance de pickup auto
+        private const float PickupRadius    = 3.0f;   // distance de pickup auto
         private const float PickupDelay     = 0.5f;   // délai avant que le drop soit collectible
         private const float BobAmplitude    = 0.15f;  // amplitude du flottement
         private const float BobSpeed        = 2.0f;   // vitesse du flottement
