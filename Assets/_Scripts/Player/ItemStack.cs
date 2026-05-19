@@ -225,6 +225,75 @@ namespace AstroVoxel.Player
             OnChanged?.Invoke();
         }
 
+        /// <summary>Échange deux slots du hotbar (drag &amp; drop hotbar ↔ hotbar).</summary>
+        public void SwapHotbarSlots(int from, int to)
+        {
+            if (from < 0 || from >= 9 || to < 0 || to >= 9 || from == to) return;
+            var tmp      = Hotbar[from];
+            Hotbar[from] = Hotbar[to];
+            Hotbar[to]   = tmp;
+            OnChanged?.Invoke();
+        }
+
+        /// <summary>Place un item à un slot hotbar précis, en échangeant si nécessaire.</summary>
+        public void MoveItemToHotbarSlot(ItemType t, int targetSlot)
+        {
+            if (targetSlot < 0 || targetSlot >= 9 || t == ItemType.None) return;
+            int fromSlot = -1;
+            for (int i = 0; i < 9; i++)
+                if (Hotbar[i].itemType == t) { fromSlot = i; break; }
+
+            if (fromSlot == targetSlot) return;
+            if (fromSlot >= 0)
+            {
+                SwapHotbarSlots(fromSlot, targetSlot);
+            }
+            else
+            {
+                // Item pas encore dans le hotbar : forcer la position
+                int count = GetCount(t);
+                if (count > 0) { Hotbar[targetSlot] = new ItemStack(t, count); OnChanged?.Invoke(); }
+            }
+        }
+
+        /// <summary>Vide un slot hotbar manuellement (drag hotbar → inventaire).</summary>
+        public void ClearHotbarSlot(int slot)
+        {
+            if (slot < 0 || slot >= 9) return;
+            Hotbar[slot] = ItemStack.Empty;
+            OnChanged?.Invoke();
+        }
+
+        /// <summary>
+        /// Recharge l'inventaire depuis une sauvegarde en une seule opération,
+        /// en ne déclenchant <see cref="OnChanged"/> qu'une seule fois à la fin.
+        /// </summary>
+        /// <param name="bag">Contenu du sac (type → quantité).</param>
+        /// <param name="hotbarSlots">ItemType de chaque slot hotbar (taille 9 ; None = vide).</param>
+        public void LoadFromSave(Dictionary<ItemType, int> bag, ItemType[] hotbarSlots)
+        {
+            _bag.Clear();
+            if (bag != null)
+                foreach (var kv in bag)
+                    if (kv.Key != ItemType.None && kv.Value > 0)
+                        _bag[kv.Key] = kv.Value;
+
+            for (int i = 0; i < 9; i++) Hotbar[i] = ItemStack.Empty;
+
+            if (hotbarSlots != null)
+            {
+                for (int i = 0; i < 9 && i < hotbarSlots.Length; i++)
+                {
+                    var t = hotbarSlots[i];
+                    if (t == ItemType.None) continue;
+                    _bag.TryGetValue(t, out int c);
+                    if (c > 0) Hotbar[i] = new ItemStack(t, c);
+                }
+            }
+
+            OnChanged?.Invoke();
+        }
+
         // ── Sync interne ──────────────────────────────────────
 
         private void SyncHotbar(ItemType t)

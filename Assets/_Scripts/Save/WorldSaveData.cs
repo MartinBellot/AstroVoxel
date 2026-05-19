@@ -41,6 +41,24 @@ namespace AstroVoxel.Save
         /// </summary>
         public int playerInShipId = -1;
 
+        // ── Mode de jeu ───────────────────────────────────────
+        /// <summary>Mode de jeu : 0 = Créatif, 1 = Survie.</summary>
+        public int gameMode; // 0 = Creative, 1 = Survival
+
+        // ── Inventaire de survie ──────────────────────────────
+        /// <summary>Contenu du sac de survie (items + quantités).</summary>
+        public List<ItemSaveEntry> survivalBag = new List<ItemSaveEntry>();
+
+        /// <summary>
+        /// Layout de la hotbar de survie : ItemType ID de chaque slot (−1 = vide).
+        /// Taille fixe de 9 éléments.
+        /// </summary>
+        public int[] survivalHotbarSlots = new int[9];
+
+        // ── Hotbar créatif ────────────────────────────────────
+        /// <summary>Blocs de la hotbar créatif : BlockType ID de chaque slot.</summary>
+        public int[] creativeHotbarSlots = new int[9];
+
         // ── Vaisseau(x) ──────────────────────────────────────────
         public List<ShipSaveEntry> ships = new List<ShipSaveEntry>();
 
@@ -140,5 +158,19 @@ namespace AstroVoxel.Save
 
         /// <summary>Blocs modifiés par le joueur (vide si aucun).</summary>
         public List<AsteroidBlockMod> mods = new List<AsteroidBlockMod>();
+    }
+
+    // ── Item de l'inventaire de survie ────────────────────────
+
+    /// <summary>
+    /// Un item de l'inventaire de survie sauvegardé : type + quantité.
+    /// </summary>
+    [Serializable]
+    public struct ItemSaveEntry
+    {
+        /// <summary>Valeur (int) de l'ItemType (−1 = None).</summary>
+        public int itemTypeId;
+        /// <summary>Quantité dans le sac.</summary>
+        public int count;
     }
 }

@@ -66,7 +66,11 @@ namespace AstroVoxel.Player
         private Transform     _itemGridContent;
         private Transform     _recipeListContent;
         private Text          _statusText;
-
+        // ── Drag & Drop ────────────────────────────────────────
+        private Canvas          _canvas;
+        private RectTransform[] _hotbarSlotRects;
+        private DragSlot        _activeDrag;
+        private GameObject      _dragVisual;
         // ── Init ──────────────────────────────────────────────
 
         public void Init(
@@ -78,8 +82,8 @@ namespace AstroVoxel.Player
         {
             _blockInteract = blockInteract;
             _materials     = materials;
-            _itemMaterials = itemMaterials;
-            BuildUI(canvas);
+            _itemMaterials = itemMaterials;            _canvas          = canvas;
+            _hotbarSlotRects = hotbarSlotRects;            BuildUI(canvas);
             _overlay.SetActive(false);
 
             // S'abonner aux changements d'inventaire pour rafraîchir en temps réel
@@ -147,10 +151,13 @@ namespace AstroVoxel.Player
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible   = true;
             RefreshAll();
+            RegisterHotbarDragSlots();
         }
 
         public void Close()
         {
+            CancelDrag();
+            UnregisterHotbarDragSlots();
             IsOpen             = false;
             _craftingTableMode = false;
             _overlay.SetActive(false);
@@ -291,6 +298,12 @@ namespace AstroVoxel.Player
             var capturedType  = stack.itemType;
             AddTrigger(trigger, EventTriggerType.PointerEnter, _ => capturedSlot.color = _slotHover);
             AddTrigger(trigger, EventTriggerType.PointerExit,  _ => capturedSlot.color = _slotBg);
+
+            // Drag & Drop
+            var ds         = slotGO.AddComponent<DragSlot>();
+            ds.Owner       = this;
+            ds.ItemType    = stack.itemType;
+            ds.HotbarIndex = -1;
         }
 
         private void RefreshRecipeList()
@@ -632,6 +645,177 @@ namespace AstroVoxel.Player
             if (font == null) font = Font.CreateDynamicFontFromOSFont("Helvetica Neue", size);
             if (font == null) font = Font.CreateDynamicFontFromOSFont("Arial", size);
             return font;
+        }
+
+        // ── Drag & Drop : gestion ─────────────────────────────
+
+        private void RegisterHotbarDragSlots()
+        {
+            if (_hotbarSlotRects == null) return;
+            for (int i = 0; i < _hotbarSlotRects.Length; i++)
+            {
+                if (_hotbarSlotRects[i] == null) continue;
+                var slotGO = _hotbarSlotRects[i].gameObject;
+                var img = slotGO.GetComponent<Image>();
+                if (img != null) img.raycastTarget = true;
+                var ds = slotGO.GetComponent<DragSlot>();
+                if (ds == null) ds = slotGO.AddComponent<DragSlot>();
+                ds.Owner       = this;
+                ds.HotbarIndex = i;
+                ds.ItemType    = ItemType.None; // lu dynamiquement au début du drag
+            }
+        }
+
+        private void UnregisterHotbarDragSlots()
+        {
+            if (_hotbarSlotRects == null) return;
+            foreach (var rt in _hotbarSlotRects)
+            {
+                if (rt == null) continue;
+                var ds = rt.gameObject.GetComponent<DragSlot>();
+                if (ds != null) Destroy(ds);
+            }
+        }
+
+        private void CancelDrag()
+        {
+            if (_dragVisual != null) { Destroy(_dragVisual); _dragVisual = null; }
+            _activeDrag = null;
+        }
+
+        internal void BeginDrag(DragSlot source, PointerEventData e)
+        {
+            _activeDrag = source;
+            _dragVisual = BuildDragVisual(source.ItemType, e);
+        }
+
+        internal void MoveDragVisual(PointerEventData e)
+        {
+            if (_dragVisual == null) return;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                (RectTransform)_canvas.transform, e.position, e.pressEventCamera, out var lp);
+            ((RectTransform)_dragVisual.transform).anchoredPosition = lp;
+        }
+
+        internal void EndDrag(DragSlot source)
+        {
+            if (_dragVisual != null) { Destroy(_dragVisual); _dragVisual = null; }
+            _activeDrag = null;
+        }
+
+        internal void Drop(DragSlot target)
+        {
+            if (_activeDrag == null || _activeDrag == target) return;
+            var src = _activeDrag;
+            var inv = SurvivalInventoryData.Instance;
+
+            if (src.HotbarIndex >= 0 && target.HotbarIndex >= 0)
+            {
+                // hotbar ↔ hotbar : échange de position
+                inv.SwapHotbarSlots(src.HotbarIndex, target.HotbarIndex);
+            }
+            else if (src.HotbarIndex < 0 && target.HotbarIndex >= 0)
+            {
+                // inventaire → hotbar
+                inv.MoveItemToHotbarSlot(src.ItemType, target.HotbarIndex);
+            }
+            else if (src.HotbarIndex >= 0 && target.HotbarIndex < 0)
+            {
+                // hotbar → inventaire : libère le slot
+                inv.ClearHotbarSlot(src.HotbarIndex);
+            }
+            else
+            {
+                // inventaire ↔ inventaire : échange leurs positions hotbar
+                int si = FindHotbarSlot(src.ItemType);
+                int ti = FindHotbarSlot(target.ItemType);
+                if (si >= 0 && ti >= 0)      inv.SwapHotbarSlots(si, ti);
+                else if (si >= 0 && ti < 0)  inv.MoveItemToHotbarSlot(target.ItemType, si);
+                else if (si < 0  && ti >= 0) inv.MoveItemToHotbarSlot(src.ItemType,    ti);
+            }
+        }
+
+        private static int FindHotbarSlot(ItemType t)
+        {
+            var h = SurvivalInventoryData.Instance.Hotbar;
+            for (int i = 0; i < h.Length; i++)
+                if (h[i].itemType == t) return i;
+            return -1;
+        }
+
+        private GameObject BuildDragVisual(ItemType itemType, PointerEventData e)
+        {
+            var go = new GameObject("DragVisual");
+            go.transform.SetParent(_canvas.transform, false);
+            var rt        = go.AddComponent<RectTransform>();
+            rt.sizeDelta  = new Vector2(SlotSize, SlotSize);
+            rt.anchorMin  = rt.anchorMax = new Vector2(0f, 0f);
+            rt.pivot      = new Vector2(0.5f, 0.5f);
+
+            // Semi-transparent + ne bloque pas les raycasts
+            var cg            = go.AddComponent<CanvasGroup>();
+            cg.alpha          = 0.80f;
+            cg.blocksRaycasts = false;
+            cg.interactable   = false;
+
+            var bg           = go.AddComponent<Image>();
+            bg.color         = new Color(0.20f, 0.20f, 0.25f, 0.85f);
+            bg.raycastTarget = false;
+
+            var iconGO       = new GameObject("Icon");
+            iconGO.transform.SetParent(go.transform, false);
+            var iconRT       = iconGO.AddComponent<RectTransform>();
+            iconRT.anchorMin = new Vector2(0.1f, 0.1f);
+            iconRT.anchorMax = new Vector2(0.9f, 0.9f);
+            iconRT.offsetMin = Vector2.zero;
+            iconRT.offsetMax = Vector2.zero;
+            var rawImg       = iconGO.AddComponent<RawImage>();
+            rawImg.raycastTarget = false;
+
+            var tempStack = new ItemStack(itemType, 1);
+            if (tempStack.IsBlock())
+            {
+                byte iconId = BlockFaceData.GetIconRenderingId((byte)(int)itemType);
+                Material mat = (_materials != null && iconId < _materials.Length) ? _materials[iconId] : null;
+                ApplyIcon(rawImg, mat, (int)itemType);
+            }
+            else
+            {
+                ApplyItemIcon(rawImg, itemType);
+            }
+
+            // Position initiale sous le curseur
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                (RectTransform)_canvas.transform, e.position, e.pressEventCamera, out var lp);
+            rt.anchoredPosition = lp;
+
+            return go;
+        }
+
+        // ── DragSlot : composant attaché sur chaque slot glissable ──
+
+        internal sealed class DragSlot : MonoBehaviour,
+            IBeginDragHandler, IDragHandler, IEndDragHandler, IDropHandler
+        {
+            public SurvivalInventory Owner;
+            public ItemType          ItemType;
+            public int               HotbarIndex = -1; // -1 = slot inventaire
+
+            public void OnBeginDrag(PointerEventData e)
+            {
+                // Hotbar : lire l'item au moment du drag (peut avoir changé)
+                if (HotbarIndex >= 0)
+                {
+                    var hotbar = SurvivalInventoryData.Instance.Hotbar;
+                    ItemType = HotbarIndex < hotbar.Length ? hotbar[HotbarIndex].itemType : ItemType.None;
+                }
+                if (ItemType == ItemType.None) { e.pointerDrag = null; return; }
+                Owner?.BeginDrag(this, e);
+            }
+
+            public void OnDrag(PointerEventData e)    => Owner?.MoveDragVisual(e);
+            public void OnEndDrag(PointerEventData e) => Owner?.EndDrag(this);
+            public void OnDrop(PointerEventData e)    => Owner?.Drop(this);
         }
     }
 }

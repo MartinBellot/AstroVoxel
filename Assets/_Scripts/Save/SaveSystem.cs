@@ -28,6 +28,7 @@ using UnityEngine.SceneManagement;
 using AstroVoxel.VoxelEngine;
 using AstroVoxel.Space;
 using AstroVoxel.Vehicle;
+using AstroVoxel.Player;
 
 namespace AstroVoxel.Save
 {
@@ -197,6 +198,9 @@ namespace AstroVoxel.Save
                 saveDate = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss"),
             };
 
+            // Mode de jeu
+            data.gameMode = (int)GameModeManager.Current;
+
             // Joueur
             if (_player != null)
             {
@@ -245,6 +249,27 @@ namespace AstroVoxel.Save
             // Astéroïdes
             CollectAsteroidData(data);
 
+            // Hotbar créatif
+            var blockInteract = _player != null ? _player.GetComponent<BlockInteraction>() : null;
+            if (blockInteract != null)
+            {
+                data.creativeHotbarSlots = new int[9];
+                var cHotbar = blockInteract.Hotbar;
+                for (int i = 0; i < 9 && i < cHotbar.Length; i++)
+                    data.creativeHotbarSlots[i] = (int)cHotbar[i];
+            }
+
+            // Inventaire de survie (sac + layout hotbar)
+            var survData = SurvivalInventoryData.Instance;
+            var allStacks = survData.GetAllStacks();
+            data.survivalBag = new List<ItemSaveEntry>(allStacks.Count);
+            foreach (var stack in allStacks)
+                data.survivalBag.Add(new ItemSaveEntry { itemTypeId = (int)stack.itemType, count = stack.count });
+
+            data.survivalHotbarSlots = new int[9];
+            for (int i = 0; i < 9; i++)
+                data.survivalHotbarSlots[i] = (int)survData.Hotbar[i].itemType;  // -1 si vide
+
             return data;
         }
 
@@ -272,6 +297,9 @@ namespace AstroVoxel.Save
 
         private void ApplyPendingLoad(WorldSaveData data)
         {
+            // Mode de jeu
+            GameModeManager.SetMode((GameMode)data.gameMode);
+
             // Home planet (monde déjà généré par UpdateChunks)
             if (_homePlanet != null && data.homePlanetMods != null && data.homePlanetMods.Count > 0)
                 _homePlanet.ApplyModifications(data.homePlanetMods);
@@ -283,6 +311,27 @@ namespace AstroVoxel.Save
             // Astéroïdes → angle orbital (avant Start()) + mods queued
             if (data.asteroidMods != null && data.asteroidMods.Count > 0)
                 ApplyAsteroidData(data.asteroidMods);
+
+            // Hotbar créatif
+            var blockInteract = _player != null ? _player.GetComponent<BlockInteraction>() : null;
+            if (blockInteract != null && data.creativeHotbarSlots != null && data.creativeHotbarSlots.Length == 9)
+                for (int i = 0; i < 9; i++)
+                    blockInteract.SetHotbarSlot(i, (BlockType)data.creativeHotbarSlots[i]);
+
+            // Inventaire de survie
+            var bag = new Dictionary<ItemType, int>();
+            if (data.survivalBag != null)
+                foreach (var entry in data.survivalBag)
+                    if (entry.count > 0) bag[(ItemType)entry.itemTypeId] = entry.count;
+
+            ItemType[] hotbarSlots = null;
+            if (data.survivalHotbarSlots != null && data.survivalHotbarSlots.Length == 9)
+            {
+                hotbarSlots = new ItemType[9];
+                for (int i = 0; i < 9; i++)
+                    hotbarSlots[i] = (ItemType)data.survivalHotbarSlots[i];
+            }
+            SurvivalInventoryData.Instance.LoadFromSave(bag, hotbarSlots);
 
             // Position joueur → différée (physique doit se stabiliser)
             StartCoroutine(RestorePlayerPosition(data));
