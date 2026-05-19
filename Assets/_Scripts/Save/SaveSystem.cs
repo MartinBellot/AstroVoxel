@@ -47,6 +47,15 @@ namespace AstroVoxel.Save
         /// </summary>
         public static WorldSaveData PendingLoad { get; private set; }
 
+        // ── Nom de la save en cours de chargement (static : survit au reload) ──
+        private static string _pendingLoadName;
+
+        // ── Overlay HUD de chargement ─────────────────────────
+        private string _overlayMsg       = null;
+        private float  _overlayAlpha     = 0f;
+        private float  _overlayFadeTimer = -1f;   // < 0 = affiché fixe ; ≥ 0 = fondu en cours
+        private const  float kOverlayFadeDuration = 1.5f;
+
         // ── Références scène ──────────────────────────────────
         private PlanetWorld          _homePlanet;
         private Transform            _player;
@@ -168,8 +177,9 @@ namespace AstroVoxel.Save
             if (data == null)
                 throw new InvalidDataException($"Fichier de sauvegarde corrompu : {saveName}");
 
-            // Stocker avant reload (champ static)
-            PendingLoad = data;
+            // Stocker avant reload (champs static)
+            _pendingLoadName = saveName;
+            PendingLoad      = data;
 
             // Fixer la seed avant reload (WorldSeedManager est static)
             WorldSeedManager.ForceInitialize(data.seed);
@@ -312,37 +322,42 @@ namespace AstroVoxel.Save
             yield return null;
             yield return null;
 
+            // Afficher l'overlay de chargement
+            ShowOverlay("Chargement en cours\u2026");
+
             // ═══════════════════════════════════════════════════════════════════
             // PHASE 1 — Geler immédiatement tout à la position sauvegardée.
             //
             // Le problème : entre la fin de Awake() et le chargement async des
-            // chunks (plusieurs secondes), les Rigidbody du joueur et des
-            // vaisseaux subissent la gravité et tombent dans le vide.
-            // Solution : passer en kinematic dès maintenant, repositionner,
-            // puis dégeler une fois le monde prêt.
+            // chunks, les Rigidbody du joueur et des vaisseaux subissent la
+            // gravité et tombent dans le vide.
+            // Solution : passer en kinematic + désactiver les colliders des
+            // vaisseaux (pour ne pas bloquer le joueur pendant le chargement),
+            // puis tout dégeler une fois le monde prêt.
             // ═══════════════════════════════════════════════════════════════════
 
             var savedPlayerPos = new Vector3(data.playerPosX, data.playerPosY, data.playerPosZ);
             var savedPlayerRot = new Quaternion(data.playerRotX, data.playerRotY, data.playerRotZ, data.playerRotW);
 
             // -- Joueur --
-            Rigidbody playerRb          = _player != null ? _player.GetComponent<Rigidbody>() : null;
+            Rigidbody playerRb           = _player != null ? _player.GetComponent<Rigidbody>() : null;
             bool      playerWasKinematic = playerRb != null && playerRb.isKinematic;
             if (playerRb != null)
             {
-                playerRb.isKinematic   = true;
-                playerRb.position      = savedPlayerPos;
-                playerRb.rotation      = savedPlayerRot;
+                playerRb.isKinematic = true;
+                playerRb.position    = savedPlayerPos;
+                playerRb.rotation    = savedPlayerRot;
             }
             else if (_player != null)
             {
                 _player.SetPositionAndRotation(savedPlayerPos, savedPlayerRot);
             }
 
-            // -- Vaisseaux --
-            Dictionary<int, ShipSaveEntry>    shipLookup  = null;
-            SpaceShipController[]             allShips    = System.Array.Empty<SpaceShipController>();
-            Dictionary<SpaceShipController, bool> frozenShips = new Dictionary<SpaceShipController, bool>();
+            // -- Vaisseaux : geler + désactiver colliders --
+            Dictionary<int, ShipSaveEntry>             shipLookup      = null;
+            SpaceShipController[]                      allShips        = System.Array.Empty<SpaceShipController>();
+            Dictionary<SpaceShipController, bool>      frozenKinematic = new Dictionary<SpaceShipController, bool>();
+            Dictionary<SpaceShipController, Collider[]> frozenColliders = new Dictionary<SpaceShipController, Collider[]>();
 
             if (data.ships != null && data.ships.Count > 0)
             {
@@ -353,12 +368,12 @@ namespace AstroVoxel.Save
                 foreach (var s in allShips)
                 {
                     if (!shipLookup.TryGetValue(s.ShipId, out var e)) continue;
-                    var sPos  = new Vector3(e.posX, e.posY, e.posZ);
-                    var sRot  = new Quaternion(e.rotX, e.rotY, e.rotZ, e.rotW);
+                    var sPos   = new Vector3(e.posX, e.posY, e.posZ);
+                    var sRot   = new Quaternion(e.rotX, e.rotY, e.rotZ, e.rotW);
                     var shipRb = s.GetComponent<Rigidbody>();
                     if (shipRb != null)
                     {
-                        frozenShips[s]     = shipRb.isKinematic;   // sauvegarder état
+                        frozenKinematic[s] = shipRb.isKinematic;
                         shipRb.isKinematic = true;
                         shipRb.position    = sPos;
                         shipRb.rotation    = sRot;
@@ -367,6 +382,13 @@ namespace AstroVoxel.Save
                     {
                         s.transform.SetPositionAndRotation(sPos, sRot);
                     }
+
+                    // Désactiver les colliders : le vaisseau kinematic geler
+                    // ne doit pas bloquer le joueur pendant que le monde se
+                    // construit autour de lui.
+                    var cols = s.GetComponentsInChildren<Collider>(includeInactive: true);
+                    frozenColliders[s] = cols;
+                    foreach (var col in cols) col.enabled = false;
                 }
             }
 
@@ -394,12 +416,12 @@ namespace AstroVoxel.Save
             }
 
             // ═══════════════════════════════════════════════════════════════════
-            // PHASE 3 — Attendre + dégeler chaque vaisseau.
+            // PHASE 3 — Attendre + dégeler + réactiver colliders pour chaque vaisseau.
             // ═══════════════════════════════════════════════════════════════════
             foreach (var s in allShips)
             {
                 if (shipLookup == null || !shipLookup.TryGetValue(s.ShipId, out var e)) continue;
-                if (!frozenShips.ContainsKey(s)) continue;
+                if (!frozenKinematic.ContainsKey(s)) continue;
 
                 var sPos = new Vector3(e.posX, e.posY, e.posZ);
 
@@ -416,8 +438,12 @@ namespace AstroVoxel.Save
                 {
                     shipRb.linearVelocity  = Vector3.zero;
                     shipRb.angularVelocity = Vector3.zero;
-                    shipRb.isKinematic     = frozenShips[s];
+                    shipRb.isKinematic     = frozenKinematic[s];
                 }
+
+                // Réactiver les colliders du vaisseau
+                if (frozenColliders.TryGetValue(s, out var cols))
+                    foreach (var col in cols) col.enabled = true;
             }
 
             // ═══════════════════════════════════════════════════════════════════
@@ -431,13 +457,19 @@ namespace AstroVoxel.Save
                     if (s.ShipId == data.playerInShipId) { s.Board(); break; }
                 }
             }
+
+            // Afficher le message de confirmation, puis fondu
+            string displayName = string.IsNullOrEmpty(_pendingLoadName) ? "monde" : _pendingLoadName;
+            ShowOverlay($"Monde chargé : {displayName}");
+            yield return new WaitForSeconds(2f);
+            StartFadeOverlay();
         }
 
         /// <summary>
         /// Retourne true si le monde voxel au niveau de <paramref name="pos"/> est
         /// complètement chargé (ou si aucun monde particulier n'est attendu à cet endroit).
         /// </summary>
-        private static bool IsVoxelWorldLoadedNear(Vector3 pos)
+        private bool IsVoxelWorldLoadedNear(Vector3 pos)
         {
             // ── Planètes (home planet + planète infinie active) ────────────────
             // Marge = 4 chunks au-dessus du coreRadius pour couvrir l'atmosphère basse.
@@ -446,7 +478,15 @@ namespace AstroVoxel.Save
             {
                 float margin = VoxelData.ChunkWidth * 4f;
                 if (Vector3.Distance(pos, p.PlanetCenter) < p.planetRadius + margin)
-                    return p.IsFullyLoaded;
+                {
+                    if (!p.IsFullyLoaded) return false;
+                    // Home planet : mods appliquées synchroniquement avant la coroutine.
+                    if (p == _homePlanet) return true;
+                    // Planète infinie : attendre aussi la fin de ApplyModifications
+                    // + la mise à jour des MeshColliders (flag géré par InfinitePlanetSystem).
+                    return _infinitePlanetSystem == null
+                        || _infinitePlanetSystem.ActiveWorldReadyForPlayer;
+                }
             }
 
             // ── Astéroïdes ─────────────────────────────────────────────────────
@@ -464,6 +504,47 @@ namespace AstroVoxel.Save
 
             // ── Espace ouvert : aucun monde voxel attendu → on peut téléporter ─
             return true;
+        }
+
+        // ── Overlay HUD ───────────────────────────────────────
+
+        private void ShowOverlay(string msg)
+        {
+            _overlayMsg       = msg;
+            _overlayAlpha     = 1f;
+            _overlayFadeTimer = -1f;
+        }
+
+        private void StartFadeOverlay() => _overlayFadeTimer = 0f;
+
+        private void Update()
+        {
+            if (_overlayMsg == null || _overlayFadeTimer < 0f) return;
+            _overlayFadeTimer += Time.deltaTime;
+            _overlayAlpha = Mathf.Clamp01(1f - _overlayFadeTimer / kOverlayFadeDuration);
+            if (_overlayAlpha <= 0f) { _overlayMsg = null; _overlayFadeTimer = -1f; }
+        }
+
+        private void OnGUI()
+        {
+            if (_overlayMsg == null || _overlayAlpha <= 0f) return;
+
+            var style = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize  = 32,
+                fontStyle = FontStyle.Bold,
+            };
+            Color tc = Color.white; tc.a = _overlayAlpha;
+            style.normal.textColor = tc;
+
+            var shadow = new GUIStyle(style);
+            Color sc = Color.black; sc.a = _overlayAlpha * 0.75f;
+            shadow.normal.textColor = sc;
+
+            float y = (Screen.height - 60f) * 0.45f;
+            GUI.Label(new Rect(2f, y + 2f, Screen.width, 60f), _overlayMsg, shadow);
+            GUI.Label(new Rect(0f, y,       Screen.width, 60f), _overlayMsg, style);
         }
 
         // ── Chemins de fichiers ───────────────────────────────

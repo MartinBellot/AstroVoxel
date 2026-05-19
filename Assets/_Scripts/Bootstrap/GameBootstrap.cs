@@ -37,6 +37,9 @@ namespace AstroVoxel.Bootstrap
 
         private void Awake()
         {
+            // Remet le jeu en mode Créatif à chaque rechargement de scène
+            GameModeManager.ResetToCreative();
+
             // ── Seed globale du monde ─────────────────────────
             // Si une sauvegarde est en attente, la seed a déjà été forcée par SaveSystem.LoadWorld().
             // Initialize() est idempotent : elle ne fait rien si IsInitialized=true.
@@ -222,6 +225,9 @@ namespace AstroVoxel.Bootstrap
             var blockInteract = playerGO.AddComponent<BlockInteraction>();
             blockInteract.Init(playerCam, world, rb);
 
+            // PlayerHealth (mode Survie)
+            playerGO.AddComponent<PlayerHealth>();
+
             // Câblage final
             controller.SetCamera(cameraGO.transform);
 
@@ -305,6 +311,15 @@ namespace AstroVoxel.Bootstrap
             invGO.transform.SetParent(canvasGO.transform, false);
             var inv = invGO.AddComponent<CreativeInventory>();
             inv.Init(canvas, blockInteract, builtMaterials, hud.HotbarSlotRects);
+
+            // Inventaire de survie (touche E en mode Survie)
+            var survInvGO = new GameObject("SurvivalInventory");
+            survInvGO.transform.SetParent(canvasGO.transform, false);
+            var survInv = survInvGO.AddComponent<SurvivalInventory>();
+            survInv.Init(canvas, blockInteract, builtMaterials, hud.HotbarSlotRects);
+
+            // Câblage BlockInteraction ↔ SurvivalInventory
+            blockInteract.InitSurvival(survInv, builtMaterials);
 
             // Console de commandes (touche T ou /)
             var consoleGO = new GameObject("GameConsole");

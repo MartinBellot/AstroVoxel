@@ -97,6 +97,11 @@ namespace AstroVoxel.Space
         private GameObject  _activeGO;
         private PlanetWorld _activeWorld;
         private Coroutine   _loadCoroutine;
+        // Vrai quand le monde actif est chargé ET que ses mods de blocs sont appliquées
+        // (les colliders de mesh ont eu le temps d'être mis à jour par le moteur physique).
+        // Utilisé par SaveSystem pour ne pas téléporter trop tôt.
+        private bool _activeWorldReady = true;
+        public  bool ActiveWorldReadyForPlayer => _activeWorldReady;
         // Buffer de modifications planètes infinies (save/load).
         // Persiste entre les sessions d'activation/désactivation.
         private readonly Dictionary<int, List<PlanetBlockMod>> _pendingPlanetMods
@@ -366,6 +371,9 @@ namespace AstroVoxel.Space
 
             _activeWorld.SetViewer(_player);
 
+            // Monde pas encore prêt pour le joueur (les mods seront appliquées async)
+            _activeWorldReady = false;
+
             // Chargement async pour éviter le freeze + application des mods en attente
             _loadCoroutine = StartCoroutine(LoadPlanetAndApplyMods(index));
         }
@@ -381,7 +389,16 @@ namespace AstroVoxel.Space
                 && mods.Count > 0)
             {
                 _activeWorld.ApplyModifications(mods);
+                // WaitForFixedUpdate garantit que PhysX a terminé le bake asynchrone
+                // des MeshColliders modifiés avant que le joueur/vaisseau soient dégelés.
+                // (yield return null ne suffit pas : le bake tourne en background thread
+                //  et n'est appliqué qu'avant la prochaine simulation physique.)
+                yield return new WaitForFixedUpdate();
+                yield return new WaitForFixedUpdate();
             }
+
+            // Le monde est prêt — SaveSystem peut maintenant téléporter le joueur.
+            _activeWorldReady = true;
         }
 
         private void DeactivateVoxelPlanet()
@@ -408,7 +425,8 @@ namespace AstroVoxel.Space
                 _activeWorld = null;
             }
 
-            _activeIndex = -1;
+            _activeIndex      = -1;
+            _activeWorldReady = true;   // plus de monde en attente
         }
 
         // ── Ressources de rendu ───────────────────────────────

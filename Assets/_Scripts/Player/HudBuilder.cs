@@ -66,6 +66,12 @@ namespace AstroVoxel.Player
         // Animation selection pulse
         private Coroutine _pulseCoroutine;
 
+        // ── Survie ────────────────────────────────────────────────
+        private GameObject _healthBarRoot;
+        private Image[]    _heartIcons;       // 10 hearts (full/half/empty via color)
+        private GameObject _miningBarRoot;
+        private Image      _miningBarFill;
+
         // ── Public API ───────────────────────────────────────
 
         /// <summary>RectTransforms des slots hotbar pour la détection de drop drag&amp;drop.</summary>
@@ -85,6 +91,13 @@ namespace AstroVoxel.Player
             BuildHotbar(canvas, blockMaterials);
             BuildBlockLabel(canvas);
             BuildInfoPanel(canvas);
+            BuildHealthBar(canvas);
+            BuildMiningBar(canvas);
+
+            // Abonnements Mode Survie
+            GameModeManager.OnGameModeChanged += OnGameModeChanged;
+            if (PlayerHealth.Instance != null)
+                PlayerHealth.Instance.OnHealthChanged += OnHealthChanged;
         }
 
         // ── Update loop ───────────────────────────────────────
@@ -95,6 +108,7 @@ namespace AstroVoxel.Player
             UpdateInfoTexts();
             UpdateHotbar();
             UpdateLabelFade();
+            UpdateSurvivalHud();
         }
 
         // ─────────────────────────────────────────────────────
@@ -152,8 +166,24 @@ namespace AstroVoxel.Player
         {
             if (_blockInteract == null || _slotBg == null) return;
 
+            // Hotbar à afficher : créatif ou survie
+            BlockType[] displayHotbar;
+            if (GameModeManager.IsSurvival)
+            {
+                var survHotbar = SurvivalInventoryData.Instance.Hotbar;
+                displayHotbar = new BlockType[9];
+                for (int i = 0; i < 9; i++)
+                    displayHotbar[i] = !survHotbar[i].IsEmpty && survHotbar[i].IsBlock()
+                        ? survHotbar[i].ToBlockType()
+                        : BlockType.Air;
+            }
+            else
+            {
+                displayHotbar = _blockInteract.Hotbar;
+            }
+
             // Detecte les changements de contenu de hotbar
-            var hotbar = _blockInteract.Hotbar;
+            var hotbar = displayHotbar;
             for (int i = 0; i < hotbar.Length && i < _slotIcon.Length; i++)
             {
                 if (hotbar[i] != _hotbarCache[i])
@@ -226,6 +256,127 @@ namespace AstroVoxel.Player
                 Color tc = _blockLabel.color;
                 tc.a = alpha;
                 _blockLabel.color = tc;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────
+        //  BUILD: Health Bar (10 cœurs, visible en mode Survie)
+        // ─────────────────────────────────────────────────────
+
+        private void BuildHealthBar(Canvas canvas)
+        {
+            const float heartW   = 18f;
+            const float heartH   = 18f;
+            const float gap      = 3f;
+            const float totalW   = 10 * heartW + 9 * gap;
+            const float yOffset  = 16f + (58f + 20f) + 36f;  // au-dessus du BlockLabel
+
+            var root = MakeRootRT("HealthBar", canvas.transform,
+                new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
+                new Vector2(0.5f, 0f), new Vector2(0f, yOffset),
+                new Vector2(totalW, heartH));
+
+            _heartIcons = new Image[10];
+            float startX = -(totalW * 0.5f) + heartW * 0.5f;
+
+            for (int i = 0; i < 10; i++)
+            {
+                float xPos  = startX + i * (heartW + gap);
+                var heartGO = new GameObject($"Heart_{i}");
+                heartGO.transform.SetParent(root, false);
+                var heartRT         = heartGO.AddComponent<RectTransform>();
+                heartRT.anchorMin   = new Vector2(0.5f, 0.5f);
+                heartRT.anchorMax   = new Vector2(0.5f, 0.5f);
+                heartRT.pivot       = new Vector2(0.5f, 0.5f);
+                heartRT.sizeDelta   = new Vector2(heartW, heartH);
+                heartRT.anchoredPosition = new Vector2(xPos, 0f);
+                var heartImg        = heartGO.AddComponent<Image>();
+                heartImg.color      = HeartColor(i, PlayerHealth.MaxHealth);
+                _heartIcons[i]      = heartImg;
+            }
+
+            _healthBarRoot = root.gameObject;
+            _healthBarRoot.SetActive(GameModeManager.IsSurvival);
+        }
+
+        private static Color HeartColor(int heartIndex, int currentHp)
+        {
+            // chaque cœur = 2 HP
+            int heartHp = (heartIndex + 1) * 2;
+            if (currentHp >= heartHp)          return new Color(0.90f, 0.15f, 0.15f, 1f);  // plein
+            if (currentHp >= heartHp - 1)      return new Color(0.90f, 0.50f, 0.10f, 1f);  // demi
+            return                                     new Color(0.30f, 0.30f, 0.32f, 1f);  // vide
+        }
+
+        private void OnHealthChanged(int current, int max)
+        {
+            if (_heartIcons == null) return;
+            for (int i = 0; i < _heartIcons.Length; i++)
+                if (_heartIcons[i] != null)
+                    _heartIcons[i].color = HeartColor(i, current);
+        }
+
+        private void OnGameModeChanged(GameMode mode)
+        {
+            if (_healthBarRoot != null)
+                _healthBarRoot.SetActive(mode == GameMode.Survival);
+            if (_miningBarRoot != null)
+                _miningBarRoot.SetActive(false); // cache la barre immédiatement
+        }
+
+        // ─────────────────────────────────────────────────────
+        //  BUILD: Mining Progress Bar (sous le crosshair)
+        // ─────────────────────────────────────────────────────
+
+        private void BuildMiningBar(Canvas canvas)
+        {
+            const float barW   = 100f;
+            const float barH   = 6f;
+            const float yBelowCrosshair = -28f;
+
+            var root = MakeRootRT("MiningBarRoot", canvas.transform,
+                new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(0.5f, 0.5f), new Vector2(0f, yBelowCrosshair),
+                new Vector2(barW, barH));
+
+            // Fond
+            var bgImg   = root.gameObject.AddComponent<Image>();
+            bgImg.color = new Color(0.10f, 0.10f, 0.12f, 0.85f);
+            MakeRounded(bgImg, 3f);
+
+            // Remplissage
+            var fillGO   = new GameObject("MiningFill");
+            fillGO.transform.SetParent(root, false);
+            var fillRT   = fillGO.AddComponent<RectTransform>();
+            fillRT.anchorMin = new Vector2(0f, 0f);
+            fillRT.anchorMax = new Vector2(0f, 1f);  // width via sizeDelta.x
+            fillRT.pivot     = new Vector2(0f, 0.5f);
+            fillRT.anchoredPosition = new Vector2(0f, 0f);
+            fillRT.sizeDelta        = new Vector2(0f, 0f);
+            _miningBarFill  = fillGO.AddComponent<Image>();
+            _miningBarFill.color = new Color(0.95f, 0.75f, 0.15f, 1f);
+
+            _miningBarRoot = root.gameObject;
+            _miningBarRoot.SetActive(false);
+        }
+
+        private void UpdateSurvivalHud()
+        {
+            if (!GameModeManager.IsSurvival) return;
+
+            // Barre de minage
+            float progress = _blockInteract != null ? _blockInteract.MineProgress : 0f;
+            if (_miningBarRoot != null)
+                _miningBarRoot.SetActive(progress > 0.001f);
+
+            if (_miningBarFill != null && progress > 0.001f)
+            {
+                var rt = _miningBarFill.GetComponent<RectTransform>();
+                if (rt != null)
+                {
+                    float parentW = _miningBarRoot.GetComponent<RectTransform>().sizeDelta.x;
+                    rt.sizeDelta  = new Vector2(parentW * progress, 0f);
+                }
             }
         }
 

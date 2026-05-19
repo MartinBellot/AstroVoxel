@@ -116,6 +116,29 @@ namespace AstroVoxel.Vehicle
         [Tooltip("Matériau des particules (laisser vide = défaut Unity). Recommandé : Particles/Additive ou URP Unlit.")]
         [SerializeField] private Material thrusterMaterial;
 
+        [Header("Propulsion verticale (Espace)")]
+        [Tooltip("ParticleSystem(s) de tuyère verticale (Espace → poussée haut). Laisser vide = création auto.")]
+        [SerializeField] private ParticleSystem[] verticalThrusterParticles;
+
+        [Tooltip("Décalage vers le bas du point d'émission vertical (unités locales).")]
+        [SerializeField, Min(0f)] private float verticalThrusterOffset = 1.5f;
+
+        [Header("Trainées d'ailes (Boost)")]
+        [Tooltip("Trainée de l'aile gauche. Laisser vide = création auto.")]
+        [SerializeField] private ParticleSystem wingTrailLeft;
+
+        [Tooltip("Trainée de l'aile droite. Laisser vide = création auto.")]
+        [SerializeField] private ParticleSystem wingTrailRight;
+
+        [Tooltip("Écartement latéral des trainées depuis l'axe central (unités).")]
+        [SerializeField] private float wingSpan               = 4.5f;
+
+        [Tooltip("Décalage vertical des trainées d'ailes (négatif = sous les ailes).")]
+        [SerializeField] private float wingVerticalOffset     = -0.2f;
+
+        [Tooltip("Décalage longitudinal des trainées d'ailes (négatif = vers l'arrière).")]
+        [SerializeField] private float wingLongitudinalOffset = -0.5f;
+
         // ── Composants ────────────────────────────────────────
 
         private Rigidbody        _rb;
@@ -158,6 +181,12 @@ namespace AstroVoxel.Vehicle
 
         /// <summary>Vitesse scalaire en unités/s.</summary>
         public float Speed => _rb != null ? _rb.linearVelocity.magnitude : 0f;
+
+        /// <summary>Vrai si le boost (Shift gauche) est actif et le joueur pilote.</summary>
+        public bool IsBoostActive => _piloting && GetBoost();
+
+        /// <summary>Vrai si la poussée verticale (Espace) est active.</summary>
+        public bool IsVerticalThrustActive => _piloting && GetVerticalThrust() > 0.1f;
 
         /// <summary>Altitude au-dessus de la surface planétaire (unités).</summary>
         public float Altitude
@@ -208,6 +237,15 @@ namespace AstroVoxel.Vehicle
             else
                 foreach (var ps in thrusterParticles)
                     ConfigureThrusterPS(ps);
+
+            if (verticalThrusterParticles == null || verticalThrusterParticles.Length == 0)
+                verticalThrusterParticles = new[] { CreateDefaultVerticalThrusterPS() };
+            else
+                foreach (var ps in verticalThrusterParticles)
+                    ConfigureVerticalThrusterPS(ps);
+
+            if (wingTrailLeft  == null) wingTrailLeft  = CreateDefaultWingTrailPS(leftSide: true);
+            if (wingTrailRight == null) wingTrailRight = CreateDefaultWingTrailPS(leftSide: false);
         }
 
         /// <summary>
@@ -297,7 +335,12 @@ namespace AstroVoxel.Vehicle
             }
         }
 
-        private void LateUpdate() => UpdateThrusterTrail();
+        private void LateUpdate()
+        {
+            UpdateThrusterTrail();
+            UpdateVerticalThrusterTrail();
+            UpdateWingTrails();
+        }
 
         private void FixedUpdate()
         {
@@ -617,6 +660,207 @@ namespace AstroVoxel.Vehicle
                 main.startSpeedMultiplier    = Mathf.Lerp(0.35f, 1f, t);
                 main.startLifetimeMultiplier = Mathf.Lerp(0.3f,  1f, t);
             }
+        }
+
+        private ParticleSystem CreateDefaultVerticalThrusterPS()
+        {
+            var go = new GameObject("VerticalThrusterTrail");
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = Vector3.down * verticalThrusterOffset;
+            // Euler(90,0,0) oriente le forward du PS vers le bas local (-Y)
+            go.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            var ps = go.AddComponent<ParticleSystem>();
+            ConfigureVerticalThrusterPS(ps);
+            return ps;
+        }
+
+        private void ConfigureVerticalThrusterPS(ParticleSystem ps)
+        {
+            var main = ps.main;
+            main.loop            = true;
+            main.playOnAwake     = true;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.maxParticles    = 400;
+            main.startLifetime   = new ParticleSystem.MinMaxCurve(0.35f, 0.9f);
+            main.startSpeed      = new ParticleSystem.MinMaxCurve(6f, 22f);
+            main.startSize       = new ParticleSystem.MinMaxCurve(0.10f, 0.48f);
+            // Cyan-blanc électrique (tuyère ionique / RCS) — contraste fort avec l'orange principal
+            main.startColor = new ParticleSystem.MinMaxGradient(
+                new Color(0.7f, 0.95f, 1.0f, 1.0f),
+                new Color(0.2f, 0.55f, 1.0f, 0.9f)
+            );
+
+            var emission = ps.emission;
+            emission.rateOverTime = 0f;
+
+            var shape = ps.shape;
+            shape.enabled   = true;
+            shape.shapeType = ParticleSystemShapeType.Cone;
+            shape.angle     = 18f;
+            shape.radius    = 0.35f;
+
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            var grad = new Gradient();
+            grad.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(new Color(0.9f,  1.0f,  1.0f),  0f),
+                    new GradientColorKey(new Color(0.3f,  0.7f,  1.0f),  0.4f),
+                    new GradientColorKey(new Color(0.05f, 0.2f,  0.8f),  0.75f),
+                    new GradientColorKey(new Color(0.0f,  0.05f, 0.3f),  1f),
+                },
+                new[]
+                {
+                    new GradientAlphaKey(1f,    0f),
+                    new GradientAlphaKey(0.7f,  0.4f),
+                    new GradientAlphaKey(0.25f, 0.75f),
+                    new GradientAlphaKey(0f,    1f),
+                }
+            );
+            col.color = new ParticleSystem.MinMaxGradient(grad);
+
+            var sol = ps.sizeOverLifetime;
+            sol.enabled = true;
+            sol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(
+                new Keyframe(0f,    0.1f, 0f, 5f),
+                new Keyframe(0.15f, 1f,   5f, 1f),
+                new Keyframe(1f,    3.5f, 1f, 0f)
+            ));
+
+            var noise = ps.noise;
+            noise.enabled     = true;
+            noise.strength    = 0.10f;
+            noise.frequency   = 1.1f;
+            noise.scrollSpeed = 0.5f;
+            noise.damping     = true;
+
+            var rend = ps.GetComponent<ParticleSystemRenderer>();
+            rend.sortingFudge = -5f;
+            rend.material     = thrusterMaterial != null
+                ? thrusterMaterial
+                : CreateThrusterMaterial();
+        }
+
+        private ParticleSystem CreateDefaultWingTrailPS(bool leftSide)
+        {
+            string goName = leftSide ? "WingTrailLeft" : "WingTrailRight";
+            var go = new GameObject(goName);
+            go.transform.SetParent(transform, false);
+            float side = leftSide ? -wingSpan : wingSpan;
+            go.transform.localPosition = new Vector3(side, wingVerticalOffset, wingLongitudinalOffset);
+            // Identique à la tuyère principale : forward vers l'arrière
+            go.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+            var ps = go.AddComponent<ParticleSystem>();
+            ConfigureWingTrailPS(ps);
+            return ps;
+        }
+
+        private void ConfigureWingTrailPS(ParticleSystem ps)
+        {
+            var main = ps.main;
+            main.loop            = true;
+            main.playOnAwake     = true;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.maxParticles    = 300;
+            main.startLifetime   = new ParticleSystem.MinMaxCurve(0.3f, 0.7f);
+            main.startSpeed      = new ParticleSystem.MinMaxCurve(3f, 10f);
+            main.startSize       = new ParticleSystem.MinMaxCurve(0.06f, 0.18f);
+            // Cyan plasma — trainée d'aile aérodynamique
+            main.startColor = new ParticleSystem.MinMaxGradient(
+                new Color(0.4f, 0.9f, 1.0f, 0.8f),
+                new Color(0.1f, 0.5f, 1.0f, 0.6f)
+            );
+
+            var emission = ps.emission;
+            emission.rateOverTime = 0f;
+
+            // Cône très étroit → trainée fine et précise
+            var shape = ps.shape;
+            shape.enabled   = true;
+            shape.shapeType = ParticleSystemShapeType.Cone;
+            shape.angle     = 5f;
+            shape.radius    = 0.08f;
+
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            var grad = new Gradient();
+            grad.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(new Color(0.8f, 1.0f, 1.0f), 0f),
+                    new GradientColorKey(new Color(0.2f, 0.6f, 1.0f), 0.35f),
+                    new GradientColorKey(new Color(0.0f, 0.2f, 0.7f), 0.7f),
+                    new GradientColorKey(new Color(0.0f, 0.0f, 0.2f), 1f),
+                },
+                new[]
+                {
+                    new GradientAlphaKey(0.9f,  0f),
+                    new GradientAlphaKey(0.5f,  0.35f),
+                    new GradientAlphaKey(0.15f, 0.7f),
+                    new GradientAlphaKey(0f,    1f),
+                }
+            );
+            col.color = new ParticleSystem.MinMaxGradient(grad);
+
+            var sol = ps.sizeOverLifetime;
+            sol.enabled = true;
+            sol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(
+                new Keyframe(0f,   0.2f, 0f, 3f),
+                new Keyframe(0.2f, 1f,   3f, 1f),
+                new Keyframe(1f,   2.5f, 1f, 0f)
+            ));
+
+            // Pas de noise : trainées aérodynamiques propres et nettes
+            var noise = ps.noise;
+            noise.enabled = false;
+
+            var rend = ps.GetComponent<ParticleSystemRenderer>();
+            rend.sortingFudge = -4f;
+            rend.material     = thrusterMaterial != null
+                ? thrusterMaterial
+                : CreateThrusterMaterial();
+        }
+
+        private void UpdateVerticalThrusterTrail()
+        {
+            if (verticalThrusterParticles == null) return;
+
+            bool active = _piloting && GetVerticalThrust() > 0.1f;
+
+            foreach (var ps in verticalThrusterParticles)
+            {
+                if (ps == null) continue;
+                var emission = ps.emission;
+                emission.rateOverTime = active ? 180f : 0f;
+                var main = ps.main;
+                main.startSpeedMultiplier    = active ? 1f : 0.4f;
+                main.startLifetimeMultiplier = active ? 1f : 0.4f;
+            }
+        }
+
+        private void UpdateWingTrails()
+        {
+            bool boostActive = _piloting && GetBoost();
+            float fwd        = _piloting ? GetForward() : 0f;
+            // Les trainées s'activent uniquement si on avance en mode boost
+            bool wingActive = boostActive && fwd > 0.1f;
+
+            float t    = wingActive ? Mathf.Clamp01(Speed / trailMaxSpeed) : 0f;
+            float rate = wingActive ? Mathf.Lerp(40f, 130f, t * t) : 0f;
+
+            SetWingTrailRate(wingTrailLeft,  rate, t);
+            SetWingTrailRate(wingTrailRight, rate, t);
+        }
+
+        private static void SetWingTrailRate(ParticleSystem ps, float rate, float t)
+        {
+            if (ps == null) return;
+            var emission = ps.emission;
+            emission.rateOverTime = rate;
+            var main = ps.main;
+            main.startSpeedMultiplier    = Mathf.Lerp(0.3f, 1f, t);
+            main.startLifetimeMultiplier = Mathf.Lerp(0.3f, 1f, t);
         }
 
         // ── Abstraction Input ─────────────────────────────────

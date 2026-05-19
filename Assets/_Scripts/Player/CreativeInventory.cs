@@ -113,6 +113,9 @@ namespace AstroVoxel.Player
             // Ignore le E quand le joueur pilote un vaisseau (E = roulis droite)
             if (toggleE && SpaceShipController.IsAnyShipPiloted) toggleE = false;
 
+            // Ignore le E en mode Survie (l'inventaire survie gère son propre toggle)
+            if (toggleE && GameModeManager.IsSurvival) toggleE = false;
+
             if (toggleE)
             {
                 if (IsOpen) Close();

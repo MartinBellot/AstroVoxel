@@ -223,6 +223,7 @@ namespace AstroVoxel.VoxelEngine
         ShroomLight        = 105,  // points lumineux mossy/nether
         PaleOakLog         = 106,  // arbres pâles cherry/mountain
         PaleOakLeaves      = 107,
+        CraftingTable      = 108,  // établi de craft
 
         // ── IDs de rendu internes (face-variants) ─────────────
         // Ces valeurs ne sont JAMAIS stockées dans les chunks.
@@ -247,7 +248,9 @@ namespace AstroVoxel.VoxelEngine
         CactusTop         = 217,
         CactusBottom      = 218,
         BasaltTop         = 219,
-        PaleOakLogTop     = 220,
+        PaleOakLogTop      = 220,
+        CraftingTableTop   = 221,  // face top de l'établi
+        CraftingTableFront = 222,  // face avant/arrière de l'établi
     }
 
     /// <summary>
@@ -257,7 +260,7 @@ namespace AstroVoxel.VoxelEngine
     {
         // Plage des IDs de blocs solides réels (stockés dans les chunks).
         private const byte SolidMin = 1;
-        private const byte SolidMax = 107;
+        private const byte SolidMax = 108;
 
         /// <summary>Retourne true si le bloc doit bloquer la génération des faces adjacentes.</summary>
         public static bool IsSolid(byte blockId) => blockId >= SolidMin && blockId <= SolidMax;

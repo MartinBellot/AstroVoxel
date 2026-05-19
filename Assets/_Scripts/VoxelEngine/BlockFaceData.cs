@@ -165,6 +165,7 @@ namespace AstroVoxel.VoxelEngine
             Reg(BlockType.ShroomLight,        "shroomlight",         "Champilumière");
             Reg(BlockType.PaleOakLog,         "pale_oak_log",        "Bûche de Chêne Pâle");
             Reg(BlockType.PaleOakLeaves,      "pale_oak_leaves",     "Feuilles de Chêne Pâle");
+            Reg(BlockType.CraftingTable,       "crafting_table_side", "Établi");
 
             // ── Face-variants (IDs de rendu internes) ────────────
             // Ces entrées ont un nom de texture mais pas de nom d'affichage.
@@ -189,6 +190,8 @@ namespace AstroVoxel.VoxelEngine
             RegTex(BlockType.CactusBottom,       "cactus_bottom");
             RegTex(BlockType.BasaltTop,          "basalt_top");
             RegTex(BlockType.PaleOakLogTop,      "pale_oak_log_top");
+            RegTex(BlockType.CraftingTableTop,    "crafting_table_top");
+            RegTex(BlockType.CraftingTableFront,  "crafting_table_front");
         }
 
         private static void Reg(BlockType t, string tex, string display)
@@ -278,6 +281,11 @@ namespace AstroVoxel.VoxelEngine
                     if (face == 0 || face == 1) return (byte)BlockType.PaleOakLogTop;
                     return blockId;
 
+                case BlockType.CraftingTable:
+                    if (face == 0) return (byte)BlockType.CraftingTableTop;
+                    if (face == 2 || face == 3) return (byte)BlockType.CraftingTableFront;
+                    return blockId;  // côtés = crafting_table_side
+
                 default:
                     return blockId;
             }
@@ -319,7 +327,8 @@ namespace AstroVoxel.VoxelEngine
                 case BlockType.Podzol:       return (byte)BlockType.PodzolTop;
                 case BlockType.Cactus:       return (byte)BlockType.CactusTop;
                 case BlockType.Basalt:       return (byte)BlockType.BasaltTop;
-                case BlockType.PaleOakLog:   return (byte)BlockType.PaleOakLogTop;
+                case BlockType.PaleOakLog:      return (byte)BlockType.PaleOakLogTop;
+                case BlockType.CraftingTable:   return (byte)BlockType.CraftingTableTop;
                 // Pour Grass, la face du dessus (blockId lui-même) est déjà grass_block_top
                 default: return blockId;
             }
@@ -407,6 +416,8 @@ namespace AstroVoxel.VoxelEngine
             (byte)BlockType.Dripstone,        (byte)BlockType.RootedDirt,
             (byte)BlockType.NetherWartBlock,  (byte)BlockType.ShroomLight,
             (byte)BlockType.PaleOakLog,       (byte)BlockType.PaleOakLeaves,
+            // Craft
+            (byte)BlockType.CraftingTable,
         };
 
         // ── Couleur de repli (si la registry n'est pas encore construite) ─

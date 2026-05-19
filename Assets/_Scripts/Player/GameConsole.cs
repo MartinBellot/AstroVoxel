@@ -247,6 +247,7 @@ namespace AstroVoxel.Player
                 case "save":    CmdSave(parts);         break;
                 case "load":    CmdLoad(parts);         break;
                 case "saves":   CmdSaves(parts);         break;
+                case "gamemode": CmdGameMode(parts);      break;
                 default:
                     PushErr($"Commande inconnue : <b>{Esc(parts[0])}</b>  —  tapez <b>help</b>");
                     break;
@@ -268,7 +269,28 @@ namespace AstroVoxel.Player
             Push($"  <color=#{H(_blue)}>/saves</color>             <color=#{H(_sub)}>Liste toutes les sauvegardes disponibles</color>");
             Push($"  <color=#{H(_blue)}>/saves delete NOM</color>  <color=#{H(_sub)}>Supprime la sauvegarde NOM</color>");
             Push($"  <color=#{H(_blue)}>/saves folder</color>      <color=#{H(_sub)}>Ouvre le dossier des sauvegardes</color>");
+            Push($"  <color=#{H(_blue)}>/gamemode survival</color>  <color=#{H(_sub)}>Passe en mode Survie (blocs à miner, vie, craft)</color>");
+            Push($"  <color=#{H(_blue)}>/gamemode creative</color>  <color=#{H(_sub)}>Repasse en mode Créatif (placement instantané)</color>");
             Push(sep);
+        }
+
+        private void CmdGameMode(string[] parts)
+        {
+            if (parts.Length < 2) { PushErr("Usage : /gamemode survival|creative"); return; }
+            switch (parts[1].ToLowerInvariant())
+            {
+                case "survival":
+                    GameModeManager.SetMode(GameMode.Survival);
+                    PushOk("Mode Survie activé.  Construis un établi pour crafter des outils.");
+                    break;
+                case "creative":
+                    GameModeManager.SetMode(GameMode.Creative);
+                    PushOk("Mode Créatif activé.");
+                    break;
+                default:
+                    PushErr($"Mode inconnu : {Esc(parts[1])}  —  survival | creative");
+                    break;
+            }
         }
 
         private void CmdClear()
@@ -295,6 +317,8 @@ namespace AstroVoxel.Player
         {
             // Attend 1 frame pour que le message s'affiche
             yield return null;
+            GameModeManager.ResetToCreative();
+            SurvivalInventoryData.Instance.Reset();
             WorldSeedManager.GenerateNewSeed();
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
