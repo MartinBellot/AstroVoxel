@@ -246,7 +246,7 @@ namespace AstroVoxel.Player
                 case "restart": CmdRestart();           break;
                 case "save":    CmdSave(parts);         break;
                 case "load":    CmdLoad(parts);         break;
-                case "saves":   CmdListSaves();         break;
+                case "saves":   CmdSaves(parts);         break;
                 default:
                     PushErr($"Commande inconnue : <b>{Esc(parts[0])}</b>  —  tapez <b>help</b>");
                     break;
@@ -263,9 +263,11 @@ namespace AstroVoxel.Player
             Push($"  <color=#{H(_blue)}>/clear</color>    <color=#{H(_sub)}>Vide tous les blocs de la hotbar</color>");
             Push($"  <color=#{H(_blue)}>/seed</color>     <color=#{H(_sub)}>Affiche la seed du monde actuel</color>");
             Push($"  <color=#{H(_blue)}>/restart</color>  <color=#{H(_sub)}>Redémarre avec une nouvelle seed aléatoire</color>");
-            Push($"  <color=#{H(_blue)}>/save NOM</color> <color=#{H(_sub)}>Sauvegarde le monde sous le nom NOM</color>");
-            Push($"  <color=#{H(_blue)}>/load NOM</color> <color=#{H(_sub)}>Charge la sauvegarde NOM</color>");
-            Push($"  <color=#{H(_blue)}>/saves</color>    <color=#{H(_sub)}>Liste toutes les sauvegardes disponibles</color>");
+            Push($"  <color=#{H(_blue)}>/save NOM</color>          <color=#{H(_sub)}>Sauvegarde le monde sous le nom NOM</color>");
+            Push($"  <color=#{H(_blue)}>/load NOM</color>          <color=#{H(_sub)}>Charge la sauvegarde NOM</color>");
+            Push($"  <color=#{H(_blue)}>/saves</color>             <color=#{H(_sub)}>Liste toutes les sauvegardes disponibles</color>");
+            Push($"  <color=#{H(_blue)}>/saves delete NOM</color>  <color=#{H(_sub)}>Supprime la sauvegarde NOM</color>");
+            Push($"  <color=#{H(_blue)}>/saves folder</color>      <color=#{H(_sub)}>Ouvre le dossier des sauvegardes</color>");
             Push(sep);
         }
 
@@ -329,6 +331,43 @@ namespace AstroVoxel.Player
         {
             yield return null;  // laisse le message s'afficher
             SaveSystem.Instance.LoadWorld(name);
+        }
+
+        private void CmdSaves(string[] parts)
+        {
+            if (parts.Length >= 2)
+            {
+                switch (parts[1].ToLowerInvariant())
+                {
+                    case "delete": CmdDeleteSave(parts); return;
+                    case "folder": CmdOpenSavesFolder();  return;
+                }
+            }
+            CmdListSaves();
+        }
+
+        private void CmdDeleteSave(string[] parts)
+        {
+            if (parts.Length < 3) { PushErr("Usage : /saves delete NOM"); return; }
+            if (SaveSystem.Instance == null) { PushErr("SaveSystem introuvable."); return; }
+            string name = SanitizeSaveName(parts[2]);
+            if (string.IsNullOrEmpty(name)) { PushErr("Nom de sauvegarde invalide."); return; }
+            try
+            {
+                SaveSystem.Instance.DeleteSave(name);
+                PushOk($"Sauvegarde supprim\u00e9e : <b>{Esc(name)}</b>");
+            }
+            catch (Exception e)
+            {
+                PushErr($"Erreur : {Esc(e.Message)}");
+            }
+        }
+
+        private void CmdOpenSavesFolder()
+        {
+            if (SaveSystem.Instance == null) { PushErr("SaveSystem introuvable."); return; }
+            SaveSystem.Instance.OpenSavesFolder();
+            PushOk("Dossier des sauvegardes ouvert.");
         }
 
         private void CmdListSaves()

@@ -35,6 +35,12 @@ namespace AstroVoxel.Save
         public float playerPosX, playerPosY, playerPosZ;
         public float playerRotX, playerRotY, playerRotZ, playerRotW;
 
+        /// <summary>
+        /// ShipId du vaisseau que le joueur pilotait au moment de la sauvegarde.
+        /// -1 = joueur à pied ; ≥ 0 = joueur embarqué dans ce vaisseau.
+        /// </summary>
+        public int playerInShipId = -1;
+
         // ── Vaisseau(x) ──────────────────────────────────────────
         public List<ShipSaveEntry> ships = new List<ShipSaveEntry>();
 

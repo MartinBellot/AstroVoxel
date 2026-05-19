@@ -270,9 +270,11 @@ namespace AstroVoxel.Editor
                 }
                 else
                 {
-                    // Repli : gris métallique neutre
+                    // Repli : gris métallique neutre — AstroVoxel/BlockUnlit garanti dans le build
                     var fallback = new Material(
-                        Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Diffuse"));
+                        Shader.Find("AstroVoxel/BlockUnlit")
+                        ?? Shader.Find("Universal Render Pipeline/Lit")
+                        ?? Shader.Find("Diffuse"));
                     fallback.color = new Color(0.4f, 0.42f, 0.46f);
                     rend.sharedMaterial = fallback;
                 }
@@ -302,7 +304,9 @@ namespace AstroVoxel.Editor
             if (rend != null)
             {
                 var mat = new Material(
-                    Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Diffuse"));
+                    Shader.Find("AstroVoxel/BlockUnlit")
+                    ?? Shader.Find("Universal Render Pipeline/Lit")
+                    ?? Shader.Find("Diffuse"));
                 mat.SetFloat("_Surface", 1f);
                 mat.SetFloat("_Blend",   0f);
                 mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");

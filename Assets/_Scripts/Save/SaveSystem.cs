@@ -104,6 +104,39 @@ namespace AstroVoxel.Save
         /// <summary>Retourne true si un fichier de save portant ce nom existe déjà.</summary>
         public bool SaveExists(string saveName) => File.Exists(GetSavePath(saveName));
 
+        /// <summary>
+        /// Supprime le fichier de sauvegarde portant ce nom.
+        /// Lance <see cref="FileNotFoundException"/> si la sauvegarde est introuvable.
+        /// </summary>
+        public void DeleteSave(string saveName)
+        {
+            string path = GetSavePath(saveName);
+            if (!File.Exists(path))
+                throw new FileNotFoundException($"Sauvegarde introuvable : {saveName}", path);
+            File.Delete(path);
+        }
+
+        /// <summary>
+        /// Ouvre le dossier des sauvegardes dans l'explorateur de fichiers (éditeur / standalone).
+        /// Sans effet en WebGL.
+        /// </summary>
+        public void OpenSavesFolder()
+        {
+            string dir = GetSaveDirectory();
+            Directory.CreateDirectory(dir);   // crée le dossier s'il n'existe pas encore
+#if UNITY_WEBGL && !UNITY_EDITOR
+            Debug.Log($"[SaveSystem] Dossier saves : {dir}");
+#elif UNITY_EDITOR_OSX || UNITY_STANDALONE_OSX
+            System.Diagnostics.Process.Start("open", "\"" + dir + "\"");
+#elif UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+            System.Diagnostics.Process.Start("explorer.exe", "\"" + dir.Replace('/', '\\') + "\"");
+#elif UNITY_EDITOR_LINUX || UNITY_STANDALONE_LINUX
+            System.Diagnostics.Process.Start("xdg-open", "\"" + dir + "\"");
+#else
+            Application.OpenURL("file://" + dir.Replace('\\', '/'));
+#endif
+        }
+
         /// <summary>Liste les noms de toutes les sauvegardes disponibles.</summary>
         public string[] GetSaveNames()
         {
@@ -164,6 +197,14 @@ namespace AstroVoxel.Save
                 data.playerRotY = _player.rotation.y;
                 data.playerRotZ = _player.rotation.z;
                 data.playerRotW = _player.rotation.w;
+            }
+
+            // Le joueur était-il dans un vaisseau ?
+            data.playerInShipId = -1;
+            var allShipsCheck = FindObjectsByType<SpaceShipController>(FindObjectsInactive.Include);
+            foreach (var s in allShipsCheck)
+            {
+                if (s.IsPiloting) { data.playerInShipId = s.ShipId; break; }
             }
 
             // Home planet
@@ -267,50 +308,60 @@ namespace AstroVoxel.Save
 
         private IEnumerator RestorePlayerPosition(WorldSaveData data)
         {
-            // Attendre 2 frames : la physique doit être stable et les colliders générés
+            // Attendre 2 frames minimum (physique stable, composants awake)
             yield return null;
             yield return null;
 
-            // Joueur
-            if (_player != null)
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE 1 — Geler immédiatement tout à la position sauvegardée.
+            //
+            // Le problème : entre la fin de Awake() et le chargement async des
+            // chunks (plusieurs secondes), les Rigidbody du joueur et des
+            // vaisseaux subissent la gravité et tombent dans le vide.
+            // Solution : passer en kinematic dès maintenant, repositionner,
+            // puis dégeler une fois le monde prêt.
+            // ═══════════════════════════════════════════════════════════════════
+
+            var savedPlayerPos = new Vector3(data.playerPosX, data.playerPosY, data.playerPosZ);
+            var savedPlayerRot = new Quaternion(data.playerRotX, data.playerRotY, data.playerRotZ, data.playerRotW);
+
+            // -- Joueur --
+            Rigidbody playerRb          = _player != null ? _player.GetComponent<Rigidbody>() : null;
+            bool      playerWasKinematic = playerRb != null && playerRb.isKinematic;
+            if (playerRb != null)
             {
-                var pos = new Vector3(data.playerPosX, data.playerPosY, data.playerPosZ);
-                var rot = new Quaternion(data.playerRotX, data.playerRotY, data.playerRotZ, data.playerRotW);
-
-                var rb = _player.GetComponent<Rigidbody>();
-                if (rb != null)
-                {
-                    rb.position        = pos;
-                    rb.rotation        = rot;
-                    rb.linearVelocity  = Vector3.zero;
-                    rb.angularVelocity = Vector3.zero;
-                }
-                else
-                {
-                    _player.SetPositionAndRotation(pos, rot);
-                }
+                playerRb.isKinematic   = true;
+                playerRb.position      = savedPlayerPos;
+                playerRb.rotation      = savedPlayerRot;
+            }
+            else if (_player != null)
+            {
+                _player.SetPositionAndRotation(savedPlayerPos, savedPlayerRot);
             }
 
-            // Vaisseau(x)
+            // -- Vaisseaux --
+            Dictionary<int, ShipSaveEntry>    shipLookup  = null;
+            SpaceShipController[]             allShips    = System.Array.Empty<SpaceShipController>();
+            Dictionary<SpaceShipController, bool> frozenShips = new Dictionary<SpaceShipController, bool>();
+
             if (data.ships != null && data.ships.Count > 0)
             {
-                // Table de lookup shipId → entrée
-                var shipLookup = new Dictionary<int, ShipSaveEntry>(data.ships.Count);
+                shipLookup = new Dictionary<int, ShipSaveEntry>(data.ships.Count);
                 foreach (var e in data.ships) shipLookup[e.shipId] = e;
 
-                var allShips = FindObjectsByType<SpaceShipController>(FindObjectsInactive.Include);
+                allShips = FindObjectsByType<SpaceShipController>(FindObjectsInactive.Include);
                 foreach (var s in allShips)
                 {
                     if (!shipLookup.TryGetValue(s.ShipId, out var e)) continue;
-                    var sPos = new Vector3(e.posX, e.posY, e.posZ);
-                    var sRot = new Quaternion(e.rotX, e.rotY, e.rotZ, e.rotW);
+                    var sPos  = new Vector3(e.posX, e.posY, e.posZ);
+                    var sRot  = new Quaternion(e.rotX, e.rotY, e.rotZ, e.rotW);
                     var shipRb = s.GetComponent<Rigidbody>();
                     if (shipRb != null)
                     {
-                        shipRb.position        = sPos;
-                        shipRb.rotation        = sRot;
-                        shipRb.linearVelocity  = Vector3.zero;
-                        shipRb.angularVelocity = Vector3.zero;
+                        frozenShips[s]     = shipRb.isKinematic;   // sauvegarder état
+                        shipRb.isKinematic = true;
+                        shipRb.position    = sPos;
+                        shipRb.rotation    = sRot;
                     }
                     else
                     {
@@ -318,6 +369,101 @@ namespace AstroVoxel.Save
                     }
                 }
             }
+
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE 2 — Attendre le chargement du monde autour du joueur.
+            // ═══════════════════════════════════════════════════════════════════
+            const float kTimeout = 90f;
+            float elapsed = 0f;
+            while (elapsed < kTimeout && !IsVoxelWorldLoadedNear(savedPlayerPos))
+            {
+                elapsed += Time.deltaTime;
+                yield return null;
+            }
+            // Laisser 2 frames supplémentaires pour que Unity mette à jour
+            // les MeshCollider des chunks fraîchement reconstruits.
+            yield return null;
+            yield return null;
+
+            // ── Dégeler le joueur ─────────────────────────────────────────────
+            if (playerRb != null)
+            {
+                playerRb.linearVelocity  = Vector3.zero;
+                playerRb.angularVelocity = Vector3.zero;
+                playerRb.isKinematic     = playerWasKinematic;
+            }
+
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE 3 — Attendre + dégeler chaque vaisseau.
+            // ═══════════════════════════════════════════════════════════════════
+            foreach (var s in allShips)
+            {
+                if (shipLookup == null || !shipLookup.TryGetValue(s.ShipId, out var e)) continue;
+                if (!frozenShips.ContainsKey(s)) continue;
+
+                var sPos = new Vector3(e.posX, e.posY, e.posZ);
+
+                float shipElapsed = 0f;
+                while (shipElapsed < kTimeout && !IsVoxelWorldLoadedNear(sPos))
+                {
+                    shipElapsed += Time.deltaTime;
+                    yield return null;
+                }
+                yield return null;   // frame physique avant de dégeler
+
+                var shipRb = s.GetComponent<Rigidbody>();
+                if (shipRb != null)
+                {
+                    shipRb.linearVelocity  = Vector3.zero;
+                    shipRb.angularVelocity = Vector3.zero;
+                    shipRb.isKinematic     = frozenShips[s];
+                }
+            }
+
+            // ═══════════════════════════════════════════════════════════════════
+            // PHASE 4 — Embarquer le joueur si nécessaire.
+            // ═══════════════════════════════════════════════════════════════════
+            if (data.playerInShipId >= 0)
+            {
+                var allShipsFinal = FindObjectsByType<SpaceShipController>(FindObjectsInactive.Include);
+                foreach (var s in allShipsFinal)
+                {
+                    if (s.ShipId == data.playerInShipId) { s.Board(); break; }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Retourne true si le monde voxel au niveau de <paramref name="pos"/> est
+        /// complètement chargé (ou si aucun monde particulier n'est attendu à cet endroit).
+        /// </summary>
+        private static bool IsVoxelWorldLoadedNear(Vector3 pos)
+        {
+            // ── Planètes (home planet + planète infinie active) ────────────────
+            // Marge = 4 chunks au-dessus du coreRadius pour couvrir l'atmosphère basse.
+            var planets = FindObjectsByType<PlanetWorld>(FindObjectsInactive.Exclude);
+            foreach (var p in planets)
+            {
+                float margin = VoxelData.ChunkWidth * 4f;
+                if (Vector3.Distance(pos, p.PlanetCenter) < p.planetRadius + margin)
+                    return p.IsFullyLoaded;
+            }
+
+            // ── Astéroïdes ─────────────────────────────────────────────────────
+            // On cherche le plus proche dans une portée de 3× son rayon.
+            var asteroids = FindObjectsByType<AsteroidWorld>(FindObjectsInactive.Exclude);
+            AsteroidWorld nearest = null;
+            float nearestDist = float.MaxValue;
+            foreach (var a in asteroids)
+            {
+                float d = Vector3.Distance(pos, a.AsteroidCenter);
+                if (d < nearestDist) { nearestDist = d; nearest = a; }
+            }
+            if (nearest != null && nearestDist < nearest.coreRadius * 3f)
+                return nearest.IsLoaded;
+
+            // ── Espace ouvert : aucun monde voxel attendu → on peut téléporter ─
+            return true;
         }
 
         // ── Chemins de fichiers ───────────────────────────────

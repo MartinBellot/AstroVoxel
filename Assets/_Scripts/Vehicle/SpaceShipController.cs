@@ -577,26 +577,20 @@ namespace AstroVoxel.Vehicle
         }
 
         /// <summary>
-        /// Crée un matériau additif compatible URP et Built-in RP.
-        /// Évite le matériau "rose" par défaut de Unity.
+        /// Crée un matériau additif pour les particules de tuyère.
+        /// Utilise AstroVoxel/ThrusterParticle (garanti inclus dans le build)
+        /// pour éviter le rose "shader manquant".
         /// </summary>
         private static Material CreateThrusterMaterial()
         {
-            // Priorité : shader URP particles → legacy Additive → Sprites/Default
-            Shader sh = Shader.Find("Universal Render Pipeline/Particles/Unlit")
+            // AstroVoxel/ThrusterParticle est toujours compilé (dans Assets/_Shaders/).
+            // Repli sur les shaders URP/Legacy si absent (éditeur uniquement).
+            Shader sh = Shader.Find("AstroVoxel/ThrusterParticle")
+                     ?? Shader.Find("Universal Render Pipeline/Particles/Unlit")
                      ?? Shader.Find("Particles/Additive")
                      ?? Shader.Find("Sprites/Default");
 
             var mat = new Material(sh) { name = "ThrusterParticle_Auto" };
-
-            // Blending additif : les particules s'additionnent (glow naturel)
-            mat.SetFloat("_Surface",   1f);   // Transparent
-            mat.SetFloat("_BlendMode", 3f);   // Additive
-            mat.SetFloat("_SrcBlend",  1f);   // One
-            mat.SetFloat("_DstBlend",  1f);   // One
-            mat.SetInt  ("_ZWrite",    0);
-            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
             return mat;
         }
 

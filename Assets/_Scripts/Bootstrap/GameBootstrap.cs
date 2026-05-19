@@ -444,7 +444,11 @@ namespace AstroVoxel.Bootstrap
 
         private static Material CreateDefaultMaterial(Color color)
         {
-            var mat = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            // AstroVoxel/BlockUnlit est toujours inclus dans le build (référencé par
+            // les matériaux de blocs). Évite le rose "shader manquant" en WebGL/build.
+            var shader = Shader.Find("AstroVoxel/BlockUnlit")
+                      ?? Shader.Find("Universal Render Pipeline/Lit");
+            var mat = new Material(shader);
             mat.color = color;
             return mat;
         }
