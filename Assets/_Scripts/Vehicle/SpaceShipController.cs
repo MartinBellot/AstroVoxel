@@ -122,7 +122,11 @@ namespace AstroVoxel.Vehicle
         private OzoneLayer       _ozone;
         private GravityAttractor _attractor;
         private PlanetWorld      _world;
-
+        // Cache des attracteurs d'astéroïdes (rafraîchi périodiquement — évite
+        // un FindObjectsByType par FixedUpdate). 50 frames ≈ 1 s à 50 Hz.
+        private GravityAttractor[] _asteroidAttractors = new GravityAttractor[0];
+        private int               _attractorRefreshTimer = 0;
+        private const int         AttractorRefreshFrames = 60;
         // ── État ──────────────────────────────────────────────
 
         private bool      _piloting;
@@ -170,7 +174,17 @@ namespace AstroVoxel.Vehicle
             _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
             _ozone     = FindAnyObjectByType<OzoneLayer>();
-            _attractor = FindAnyObjectByType<GravityAttractor>();
+            // Récupère spécifiquement l'attracteur PLANÉTAIRE (InfluenceRadius == 0,
+            // les astéroïdes ont une zone d'influence finie >0).
+            var allAttractors = FindObjectsByType<GravityAttractor>(FindObjectsInactive.Exclude);
+            for (int i = 0; i < allAttractors.Length; i++)
+            {
+                if (allAttractors[i] != null && allAttractors[i].InfluenceRadius <= 0f)
+                {
+                    _attractor = allAttractors[i];
+                    break;
+                }
+            }
         }
 
         private void Start()
@@ -190,6 +204,15 @@ namespace AstroVoxel.Vehicle
         {
             _player       = player;
             _playerCamera = playerCam;
+
+            // S'assurer que la caméra du vaisseau est taguée MainCamera afin que
+            // Camera.main la retourne lors du pilotage (sinon le LOD des astéroïdes
+            // se base sur une référence figée, le joueur étant désactivé).
+            if (shipCamera != null)
+            {
+                try { shipCamera.tag = "MainCamera"; }
+                catch (UnityException) { /* tag absent du projet */ }
+            }
         }
 
         /// <summary>
@@ -276,12 +299,60 @@ namespace AstroVoxel.Vehicle
                 _rb.AddForce(gravDir * _attractor.GravityForce, ForceMode.Acceleration);
             }
 
+            // Gravité des astéroïdes : actif en permanence dès qu'on entre dans la
+            // zone d'influence d'un astéroïde (même en atmosphère, faible impact).
+            ApplyAsteroidGravity();
+
             if (!_piloting) return;
 
             ApplyThrust();
             ApplyFlightAssist();
             ApplyRotation();
             ClampSpeed();
+        }
+
+        // ── Gravité multi-astéroïdes ──────────────────────────
+
+        /// <summary>
+        /// Trouve l'astéroïde le plus proche dans sa zone d'influence et applique
+        /// sa gravité. Cache la liste pour éviter un FindObjectsByType par tick.
+        /// </summary>
+        private void ApplyAsteroidGravity()
+        {
+            // Rafraîchit la liste périodiquement (les astéroïdes peuvent apparaître/disparaître).
+            if (_attractorRefreshTimer <= 0)
+            {
+                _attractorRefreshTimer = AttractorRefreshFrames;
+                var all = FindObjectsByType<GravityAttractor>(FindObjectsInactive.Exclude);
+                int count = 0;
+                for (int i = 0; i < all.Length; i++)
+                    if (all[i] != null && all[i].InfluenceRadius > 0f) count++;
+                _asteroidAttractors = new GravityAttractor[count];
+                int k = 0;
+                for (int i = 0; i < all.Length; i++)
+                    if (all[i] != null && all[i].InfluenceRadius > 0f) _asteroidAttractors[k++] = all[i];
+            }
+            _attractorRefreshTimer--;
+
+            GravityAttractor best = null;
+            float bestDist = float.MaxValue;
+            for (int i = 0; i < _asteroidAttractors.Length; i++)
+            {
+                var a = _asteroidAttractors[i];
+                if (a == null) continue;
+                float d = Vector3.Distance(_rb.position, a.transform.position);
+                if (d <= a.InfluenceRadius && d < bestDist)
+                {
+                    best     = a;
+                    bestDist = d;
+                }
+            }
+
+            if (best != null)
+            {
+                Vector3 dir = (best.transform.position - _rb.position).normalized;
+                _rb.AddForce(dir * best.GravityForce, ForceMode.Acceleration);
+            }
         }
 
         // ── Propulsion ────────────────────────────────────────

@@ -25,6 +25,67 @@ namespace AstroVoxel.Space
         /// <summary>Nombre max d'astéroïdes pouvant être en mode voxel simultanément.</summary>
         private const int MaxVoxelAsteroids = 4;
 
+        /// <summary>
+        /// Hystérésis : le demandeur doit être au moins (1 - margin) × plus proche
+        /// que le voxel le plus lointain pour l'évincer. Évite l'oscillation entre
+        /// deux astéroïdes de distance similaire.
+        /// </summary>
+        private const float EvictionHysteresis = 0.10f;
+
+        // Cache de la liste d'AsteroidLOD pour éviter FindObjectsByType à chaque appel
+        // de RequestVoxelSlot (potentiellement plusieurs fois par frame).
+        private AsteroidLOD[] _lodCache = System.Array.Empty<AsteroidLOD>();
+        private float         _lodCacheTimer = 0f;
+        private const float   LodCacheRefreshInterval = 2f;
+
+        private Transform _player;
+
+        private void Update()
+        {
+            _lodCacheTimer -= Time.deltaTime;
+            if (_lodCacheTimer <= 0f)
+            {
+                _lodCacheTimer = LodCacheRefreshInterval;
+                _lodCache = FindObjectsByType<AsteroidLOD>(FindObjectsInactive.Exclude);
+            }
+        }
+
+        /// <summary>
+        /// Appelé par un AsteroidLOD avant de charger ses chunks voxel.
+        /// Retourne true si un slot est disponible. Si le budget est plein,
+        /// évince le voxel actuellement le plus lointain SI le demandeur est
+        /// significativement plus proche (hystérésis) → priorité par distance,
+        /// jamais bloqué, sans oscillation.
+        /// </summary>
+        public bool RequestVoxelSlot(AsteroidLOD requester, float requesterDist)
+        {
+            // Cache lazy au premier appel (avant le 1er Update).
+            if (_lodCache.Length == 0)
+                _lodCache = FindObjectsByType<AsteroidLOD>(FindObjectsInactive.Exclude);
+
+            int          voxelCount   = 0;
+            AsteroidLOD  farthest     = null;
+            float        farthestDist = -1f;
+            for (int i = 0; i < _lodCache.Length; i++)
+            {
+                var l = _lodCache[i];
+                if (l == null || l == requester || !l.IsVoxels) continue;
+                voxelCount++;
+                float d = l.DistanceToPlayer;
+                if (d > farthestDist) { farthestDist = d; farthest = l; }
+            }
+
+            if (voxelCount < MaxVoxelAsteroids) return true;
+
+            // Plein : évince le plus lointain si on est significativement plus proche.
+            if (farthest != null && requesterDist < farthestDist * (1f - EvictionHysteresis))
+            {
+                farthest.ForceUnloadVoxels();
+                return true;
+            }
+            return false;
+        }
+
         // ── Champs créés ──────────────────────────────────────
         private AsteroidField _closeCluster;
         private AsteroidField _mainBelt;
@@ -61,6 +122,7 @@ namespace AstroVoxel.Space
             Vector3    sunPosition)
         {
             Vector3 planetCenter = Vector3.zero;
+            _player = player;
 
             // ─ Champ 1 : Close Cluster (orbite basse autour de la planète) ─
             // innerOrbitRadius >= playerSpawnDist(60) + DistVoxel(90) + marge = 160+

@@ -34,11 +34,13 @@ namespace AstroVoxel.Space
         private MeshFilter    _lodMF;
         private MeshRenderer  _lodMR;
         private GameObject    _lodGO;
-        private Transform     _player;
-
+        private Transform     _player;        private Transform     _camera;   // référence prioritaire (suit ship/joueur actif)
         // ── État ──────────────────────────────────────────────
         private enum LodState { Culled, LODMesh, Voxels }
         private LodState _state = LodState.Culled;
+
+        /// <summary>Vrai si cet astéroïde est actuellement en mode voxel (chargé).</summary>
+        public bool IsVoxels => _state == LodState.Voxels;
 
         // ── Initialisation publique ───────────────────────────
 
@@ -61,23 +63,75 @@ namespace AstroVoxel.Space
 
         private void Update()
         {
-            if (_player == null) return;
-            float dist = Vector3.Distance(transform.position, _player.position);
+            // Résolution paresseuse de la caméra active (peut changer en cours de jeu :
+            // ex. embarquement vaisseau désactive le joueur → caméra du ship prend le relais).
+            if (_camera == null || !_camera.gameObject.activeInHierarchy)
+                _camera = ResolveActiveCamera();
+
+            Transform reference = _camera != null ? _camera : _player;
+            if (reference == null) return;
+
+            float dist = Vector3.Distance(transform.position, reference.position);
             UpdateLOD(dist);
+
+            // Une fois les chunks voxel entièrement chargés, on peut masquer le
+            // mesh LOD (qui restait visible pendant la coroutine de chargement).
+            if (_state == LodState.Voxels && _lodGO.activeSelf && _world.IsLoaded)
+                _lodGO.SetActive(false);
+        }
+        /// <summary>Distance courante au joueur (cache, calculé dans Update).</summary>
+        public float DistanceToPlayer
+        {
+            get
+            {
+                Transform reference = (_camera != null && _camera.gameObject.activeInHierarchy)
+                    ? _camera
+                    : _player;
+                if (reference == null) return float.MaxValue;
+                return Vector3.Distance(transform.position, reference.position);
+            }
         }
 
+        /// <summary>
+        /// Trouve une caméra active : d'abord Camera.main, sinon la première
+        /// caméra activée dans la scène (couvre le cas où la shipCamera n'est
+        /// pas taguée MainCamera).
+        /// </summary>
+        private static Transform ResolveActiveCamera()
+        {
+            var main = Camera.main;
+            if (main != null && main.isActiveAndEnabled) return main.transform;
+
+            var all = Camera.allCameras;
+            for (int i = 0; i < all.Length; i++)
+                if (all[i] != null && all[i].isActiveAndEnabled)
+                    return all[i].transform;
+
+            return null;
+        }
         // ── LOD ───────────────────────────────────────────────
 
         private void UpdateLOD(float dist)
         {
+            // 1. Calcul de l'état souhaité d'après la distance.
             LodState target;
             if      (dist < DistVoxel) target = LodState.Voxels;
             else if (dist < DistLOD)   target = LodState.LODMesh;
             else                       target = LodState.Culled;
 
+            // 2. Gate de budget : si on veut passer en Voxels mais qu'aucun slot n'est
+            //    disponible, on rétrograde vers LODMesh AVANT toute transition.
+            //    Le manager peut accepter en évinçant un voxel plus lointain.
+            if (target == LodState.Voxels
+                && AsteroidSystemManager.Instance != null
+                && !AsteroidSystemManager.Instance.RequestVoxelSlot(this, dist))
+            {
+                target = LodState.LODMesh;
+            }
+
             if (target == _state) return;
 
-            // Quitte l'état précédent
+            // 3. Quitte l'état précédent.
             switch (_state)
             {
                 case LodState.Voxels:
@@ -88,13 +142,14 @@ namespace AstroVoxel.Space
                     break;
             }
 
-            // Entre dans le nouvel état
+            // 4. Entre dans le nouvel état.
             switch (target)
             {
                 case LodState.Voxels:
+                    // Garde le mesh LOD visible pendant le chargement async des chunks
+                    // pour éviter le "trou" visuel (la coroutine spawne 4 chunks/frame).
+                    _lodGO.SetActive(true);
                     _world.LoadChunks();
-                    _lodGO.SetActive(false);
-                    Debug.Log($"[AsteroidLOD] {name} → VOXELS (dist={dist:F1}, chunks={_world.ChunkCount})");
                     break;
                 case LodState.LODMesh:
                     _lodGO.SetActive(true);

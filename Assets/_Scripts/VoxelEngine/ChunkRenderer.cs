@@ -44,7 +44,8 @@ namespace AstroVoxel.VoxelEngine
         private IVoxelWorld _world;           // référence pour la lookup des voisins réels
         private Quaternion _chunkRotation;    // rotation de ce chunk (local +Y = radial sortant)
         private FaceIndex  _chunkFace;        // face canonique (masque de génération)
-        private System.Func<Vector3, byte> _oobBlockProvider;  // fournisseur de blocs hors-chunk        private bool       _useRadialOrientation = true;       // false pour astéroïdes (chunks cubiques)
+        private System.Func<Vector3, byte> _oobBlockProvider;  // fournisseur de blocs hors-chunk
+        private bool       _useRadialOrientation = true;       // false pour astéroïdes (chunks cubiques)
         // ── Inspector (mode plat standalone) ─────────────────
         [Header("Génération du terrain (mode standalone)")]
         [Tooltip("Nombre de couches solides depuis le bas du Chunk.")]

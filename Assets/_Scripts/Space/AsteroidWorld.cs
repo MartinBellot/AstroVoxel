@@ -2,16 +2,17 @@
 //  AsteroidWorld.cs
 //  Monde voxel sphérique pour un astéroïde.
 //
-//  Architecture calquée sur PlanetWorld mais :
-//    • Rayon et seed configurables par instance.
-//    • Utilise AsteroidChunkGenerator (Blackstone/Obsidian/minerais).
-//    • 18-Face Cube-Sphère (même système que la planète).
-//    • Chargement/déchargement piloté par AsteroidLOD (pas d'auto-start).
-//    • Expose IVoxelWorld → compatible BlockInteraction & ChunkRenderer.
-//    • Possède un GravityAttractor (gravité faible, portée limitée).
+//  Architecture (v2 — simple cubic grid) :
+//    • Grille de chunks 16³ AXIS-ALIGNED dans le repère LOCAL de l'astéroïde.
+//    • Chaque bloc world est COUVERT PAR UN SEUL CHUNK → zéro z-fighting,
+//      zéro géométrie redondante (vs l'ancien système 6-faces cube-sphère
+//      qui faisait se chevaucher jusqu'à 6 chunks au centre d'un petit
+//      astéroïde, multipliant la géométrie par 6 et causant un flicker).
+//    • Skip des chunks vides AVANT instanciation → grosse économie GPU/CPU.
+//    • Suit la rotation propre de l'astéroïde (chunks enfants).
+//    • Expose IVoxelWorld → compatible BlockInteraction & MeteoriteController.
 // ============================================================
 
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 using AstroVoxel.VoxelEngine;
@@ -21,9 +22,7 @@ namespace AstroVoxel.Space
 {
     /// <summary>
     /// MonoBehaviour racine d'un astéroïde voxel.
-    /// Gère la grille de chunks orientés (18-Face Cube-Sphère).
-    /// Expose l'API BreakBlock / PlaceBlock compatible <see cref="IVoxelWorld"/>.
-    /// Le chargement des chunks est déclenché depuis <see cref="AsteroidLOD"/>.
+    /// Utilise une grille cubique simple (pas le 18-face cube-sphère).
     /// </summary>
     [RequireComponent(typeof(GravityAttractor))]
     public sealed class AsteroidWorld : MonoBehaviour, IVoxelWorld
@@ -40,12 +39,18 @@ namespace AstroVoxel.Space
         [SerializeField] public Material[] blockMaterials;
 
         // ── État interne ──────────────────────────────────────
-        private readonly Dictionary<FaceChunkCoord, ChunkRenderer> _chunks
-            = new Dictionary<FaceChunkCoord, ChunkRenderer>();
+        private readonly Dictionary<Vector3Int, ChunkRenderer> _chunks
+            = new Dictionary<Vector3Int, ChunkRenderer>();
 
         private bool _loaded = false;
+        private Coroutine _loadCo;
+        private Material  _fallbackMaterial;   // cache (évite Shader.Find par chunk)
 
-        // ── Propriété publique ────────────────────────────────
+        // Nombre max de chunks instanciés par frame pendant un chargement.
+        // Plus haut = chargement plus rapide mais hitch plus visible.
+        private const int ChunksPerFrame = 4;
+
+        // ── Propriétés publiques ──────────────────────────────
         public Vector3 AsteroidCenter => transform.position;
         public bool    IsLoaded       => _loaded;
         public int     ChunkCount     => _chunks.Count;
@@ -58,26 +63,23 @@ namespace AstroVoxel.Space
         /// <inheritdoc/>
         public ChunkRenderer GetChunkAt(Vector3 worldPos)
         {
-            _chunks.TryGetValue(WorldToFaceChunk(worldPos), out ChunkRenderer cr);
+            _chunks.TryGetValue(WorldToChunkCoord(worldPos), out ChunkRenderer cr);
             return cr;
         }
 
         /// <inheritdoc/>
         public Vector3Int WorldToLocalBlock(Vector3 worldPos)
         {
+            // Convertit en repère local de l'astéroïde (gère rotation propre).
+            Vector3 local = transform.InverseTransformPoint(worldPos);
             int cs = VoxelData.ChunkWidth;
-            FaceChunkCoord fc = WorldToFaceChunk(worldPos);
-            int fi = (int)fc.Face;
-
-            Vector3 rel = worldPos - AsteroidCenter;
-            int gu = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Rights  [fi]));
-            int gr = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Normals [fi]));
-            int gv = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Forwards[fi]));
-
-            return new Vector3Int(
-                gu - fc.U * cs,
-                gr - fc.R * cs,
-                gv - fc.V * cs);
+            int gx = Mathf.FloorToInt(local.x);
+            int gy = Mathf.FloorToInt(local.y);
+            int gz = Mathf.FloorToInt(local.z);
+            int lx = ((gx % cs) + cs) % cs;
+            int ly = ((gy % cs) + cs) % cs;
+            int lz = ((gz % cs) + cs) % cs;
+            return new Vector3Int(lx, ly, lz);
         }
 
         /// <inheritdoc/>
@@ -107,62 +109,67 @@ namespace AstroVoxel.Space
         // ── Chargement / déchargement ─────────────────────────
 
         /// <summary>
-        /// Génère tous les chunks de la coque de l'astéroïde.
-        /// Appelé par <see cref="AsteroidLOD"/> quand le joueur s'approche.
+        /// Génère tous les chunks nécessaires pour couvrir le volume de l'astéroïde.
+        /// Skip automatiquement les chunks 100 % Air (économie majeure).
+        /// Le travail est étalé sur plusieurs frames pour éviter un freeze.
         /// </summary>
         public void LoadChunks()
         {
-            if (_loaded) return;
+            if (_loaded || _loadCo != null) return;
+            _loadCo = StartCoroutine(LoadChunksCoroutine());
+        }
 
-            int   cs       = VoxelData.ChunkWidth;
-            float amplitude = coreRadius * 0.40f;
-            float halfDiag  = cs * 0.8660254f;        // √3/2 * cs
-            float shellMax  = coreRadius + amplitude + 1f + halfDiag;
-            // shellMin négatif : couvre le noyau jusqu'à r = 0
-            float shellMin  = -halfDiag;
+        private System.Collections.IEnumerator LoadChunksCoroutine()
+        {
+            int   cs         = VoxelData.ChunkWidth;
+            float amplitude  = coreRadius * 0.40f;
+            float shellMax   = coreRadius + amplitude + 1f;          // rayon englobant
+            float shellMin   = Mathf.Max(0f, coreRadius - amplitude - 1f);
+            int   range      = Mathf.CeilToInt(shellMax / cs) + 1;   // rayon en chunks
+            float chunkDiag  = cs * 1.7321f;                          // sqrt(3)*16
 
-            float step = cs * 0.5f;
-            int   maxS = Mathf.CeilToInt(shellMax / step) + 2;
+            int spawned = 0, skipped = 0, spawnedThisFrame = 0;
 
-            for (int dz = -maxS; dz <= maxS; dz++)
-            for (int dy = -maxS; dy <= maxS; dy++)
-            for (int dx = -maxS; dx <= maxS; dx++)
+            for (int cz = -range; cz <= range; cz++)
+            for (int cy = -range; cy <= range; cy++)
+            for (int cx = -range; cx <= range; cx++)
             {
-                float fx   = (dx + 0.5f) * step;
-                float fy   = (dy + 0.5f) * step;
-                float fz   = (dz + 0.5f) * step;
-                float dist = Mathf.Sqrt(fx * fx + fy * fy + fz * fz);
+                // Distance min entre la boîte du chunk et le centre local (0,0,0).
+                float boxMinX = cx * cs, boxMaxX = (cx + 1) * cs;
+                float boxMinY = cy * cs, boxMaxY = (cy + 1) * cs;
+                float boxMinZ = cz * cs, boxMaxZ = (cz + 1) * cs;
+                float ncX = Mathf.Clamp(0f, boxMinX, boxMaxX);
+                float ncY = Mathf.Clamp(0f, boxMinY, boxMaxY);
+                float ncZ = Mathf.Clamp(0f, boxMinZ, boxMaxZ);
+                float nearest = Mathf.Sqrt(ncX * ncX + ncY * ncY + ncZ * ncZ);
+                if (nearest > shellMax) continue;
 
-                if (dist > shellMax || dist < shellMin) continue;
+                // Distance max (coin opposé) : si elle est sous shellMin, le chunk est
+                // 100 % à l'intérieur du noyau. Comme tous ses voisins le seront aussi,
+                // aucune face visible → skip purement (gain énorme sur gros astéroïdes).
+                float fcX = Mathf.Max(Mathf.Abs(boxMinX), Mathf.Abs(boxMaxX));
+                float fcY = Mathf.Max(Mathf.Abs(boxMinY), Mathf.Abs(boxMaxY));
+                float fcZ = Mathf.Max(Mathf.Abs(boxMinZ), Mathf.Abs(boxMaxZ));
+                float farthest = Mathf.Sqrt(fcX * fcX + fcY * fcY + fcZ * fcZ);
+                bool deepInterior = farthest < shellMin - chunkDiag;
+                if (deepInterior) { skipped++; continue; }
 
-                var       sample = new Vector3(fx, fy, fz);
-                FaceIndex fi     = SphereFace.GetFace(sample);
-                int       f      = (int)fi;
+                var coord = new Vector3Int(cx, cy, cz);
+                if (_chunks.ContainsKey(coord)) continue;
 
-                int U = Mathf.FloorToInt(Vector3.Dot(sample, SphereFace.Rights  [f]) / cs);
-                int V = Mathf.FloorToInt(Vector3.Dot(sample, SphereFace.Forwards[f]) / cs);
-                int R = Mathf.FloorToInt(Vector3.Dot(sample, SphereFace.Normals [f]) / cs);
+                int tris = TrySpawnChunk(coord);
+                if (tris > 0) { spawned++; spawnedThisFrame++; }
+                else           skipped++;
 
-                var coord = new FaceChunkCoord(fi, U, V, R);
-                if (!_chunks.ContainsKey(coord))
-                    SpawnChunk(coord);
+                if (spawnedThisFrame >= ChunksPerFrame)
+                {
+                    spawnedThisFrame = 0;
+                    yield return null;
+                }
             }
 
             _loaded = true;
-
-            // Diagnostic : compte les chunks réellement visibles (au moins un vertex)
-            int visible = 0;
-            int totalTris = 0;
-            foreach (var kv in _chunks)
-            {
-                var mf = kv.Value != null ? kv.Value.GetComponent<MeshFilter>() : null;
-                if (mf != null && mf.sharedMesh != null && mf.sharedMesh.vertexCount > 0)
-                {
-                    visible++;
-                    totalTris += mf.sharedMesh.triangles.Length / 3;
-                }
-            }
-            Debug.Log($"[AsteroidWorld] {name} LoadChunks: spawned={_chunks.Count}, nonEmpty={visible}, tris={totalTris}, coreR={coreRadius:F1}, center={AsteroidCenter}");
+            _loadCo = null;
         }
 
         /// <summary>
@@ -170,6 +177,7 @@ namespace AstroVoxel.Space
         /// </summary>
         public void UnloadChunks()
         {
+            if (_loadCo != null) { StopCoroutine(_loadCo); _loadCo = null; }
             foreach (var kv in _chunks)
                 if (kv.Value != null)
                     Destroy(kv.Value.gameObject);
@@ -177,84 +185,119 @@ namespace AstroVoxel.Space
             _loaded = false;
         }
 
-        // ── Lookup interne ────────────────────────────────────
+        // ── Conversion world ↔ chunk ──────────────────────────
 
-        private FaceChunkCoord WorldToFaceChunk(Vector3 worldPos)
+        private Vector3Int WorldToChunkCoord(Vector3 worldPos)
         {
-            int    cs   = VoxelData.ChunkWidth;
-            Vector3 rel  = worldPos - AsteroidCenter;
-            FaceIndex fi = SphereFace.GetFace(rel);
-            int       f  = (int)fi;
-
-            int U = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Rights  [f]) / cs);
-            int V = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Forwards[f]) / cs);
-            int R = Mathf.FloorToInt(Vector3.Dot(rel, SphereFace.Normals [f]) / cs);
-
-            return new FaceChunkCoord(fi, U, V, R);
+            Vector3 local = transform.InverseTransformPoint(worldPos);
+            int cs = VoxelData.ChunkWidth;
+            return new Vector3Int(
+                Mathf.FloorToInt(local.x / cs),
+                Mathf.FloorToInt(local.y / cs),
+                Mathf.FloorToInt(local.z / cs));
         }
+
+        // ── Rebuild des voisins après modification de bloc ───
 
         private void RebuildNeighbourChunks(Vector3 modifiedWorldPos)
         {
-            FaceChunkCoord selfCoord = WorldToFaceChunk(modifiedWorldPos);
-            Quaternion     rot       = SphereFace.GetRotation(selfCoord.Face);
-
+            Vector3Int self = WorldToChunkCoord(modifiedWorldPos);
             for (int face = 0; face < 6; face++)
             {
-                Vector3 localOffset = new Vector3(
+                var off = new Vector3Int(
                     VoxelData.FaceChecks[face, 0],
                     VoxelData.FaceChecks[face, 1],
                     VoxelData.FaceChecks[face, 2]);
-
-                Vector3        neighbourWorld = modifiedWorldPos + rot * localOffset;
-                FaceChunkCoord neighbourCoord = WorldToFaceChunk(neighbourWorld);
-
-                if (neighbourCoord.Equals(selfCoord)) continue;
-
-                if (_chunks.TryGetValue(neighbourCoord, out ChunkRenderer nb))
+                Vector3Int nc = self + off;
+                if (nc.Equals(self)) continue;
+                if (_chunks.TryGetValue(nc, out ChunkRenderer nb))
                     nb.RebuildMesh();
             }
         }
 
-        private void SpawnChunk(FaceChunkCoord coord)
+        // ── Spawn d'un chunk (skip si vide) ──────────────────
+
+        /// <summary>
+        /// Génère les données du chunk, vérifie qu'il contient au moins un bloc
+        /// solide, puis instancie le GameObject. Retourne le nombre de triangles
+        /// (0 si le chunk a été skippé car vide).
+        /// </summary>
+        private int TrySpawnChunk(Vector3Int coord)
         {
-            int cs   = VoxelData.ChunkWidth;
-            int fi   = (int)coord.Face;
+            int cs = VoxelData.ChunkWidth;
 
-            // Origine world du chunk (coin bas-gauche en espace face-local)
-            Vector3 origin = AsteroidCenter
-                + SphereFace.Rights  [fi] * (coord.U * cs)
-                + SphereFace.Normals [fi] * (coord.R * cs)
-                + SphereFace.Forwards[fi] * (coord.V * cs);
+            // Position du chunk dans le repère LOCAL de l'astéroïde (rotation = identity locale).
+            Vector3 localOrigin = new Vector3(coord.x * cs, coord.y * cs, coord.z * cs);
 
-            Quaternion rot = SphereFace.GetRotation(coord.Face);
+            // Génère le contenu voxel en repère LOCAL (asteroidCenter = origin locale = 0).
+            // → rotation-invariant : pas de re-génération si l'astéroïde tourne.
+            var chunkData = new ChunkData();
+            AsteroidChunkGenerator.Generate(
+                chunkData, localOrigin, Vector3.zero, Quaternion.identity, coreRadius, seed);
 
-            var go = new GameObject($"AChunk_{coord}");
-            go.transform.SetParent(transform, worldPositionStays: true);
-            go.transform.position = origin;
-            go.transform.rotation = rot;
+            // Skip si 100 % Air → grosse économie (sphère inscrite dans cube : ~50 % cubes vides).
+            if (IsChunkAllAir(chunkData)) return 0;
+
+            // Instancie le GameObject enfant de l'astéroïde (suit position + rotation).
+            var go = new GameObject($"AChunk_{coord.x}_{coord.y}_{coord.z}");
+            go.transform.SetParent(transform, worldPositionStays: false);
+            go.transform.localPosition = localOrigin;
+            go.transform.localRotation = Quaternion.identity;
 
             var mr = go.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = blockMaterials != null && blockMaterials.Length > 0 && blockMaterials[0] != null
-                ? blockMaterials[0]
-                : new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            mr.sharedMaterial = blockMaterials != null && blockMaterials.Length > 1 && blockMaterials[1] != null
+                ? blockMaterials[1]
+                : GetFallbackMaterial();
 
-            // Capture des paramètres pour le provider OOB
-            float  r      = coreRadius;
-            int    s      = seed;
-            Vector3 center = AsteroidCenter;
-
-            // Génère les données voxel avec le bon générateur (Blackstone/Obsidian),
-            // PAS PlanetChunkGenerator (qui produirait herbe/arbres).
-            var chunkData = new ChunkData();
-            AsteroidChunkGenerator.Generate(chunkData, origin, center, rot, r, s);
+            // OOB provider : pour le mesh-builder, retourne le bloc voisin hors-chunk
+            // depuis le GÉNÉRATEUR (en repère local rotation-invariant).
+            float r = coreRadius;
+            int   s = seed;
+            Transform tr = transform;
+            System.Func<Vector3, byte> oob = worldPos =>
+            {
+                // worldPos vient du mesh-builder via transform.TransformPoint → world.
+                // On le ramène en local pour interroger le générateur.
+                Vector3 localPos = tr.InverseTransformPoint(worldPos);
+                return AsteroidChunkGenerator.GetBlockType(localPos, Vector3.zero, r, s);
+            };
 
             var cr = go.AddComponent<ChunkRenderer>();
             cr.InitFromWorld(
-                origin, center, this, rot, coord.Face, blockMaterials,
-                oobProvider: pos => AsteroidChunkGenerator.GetBlockType(pos, center, r, s),
-                preGeneratedData: chunkData);
+                go.transform.position,   // origin world courant
+                AsteroidCenter,          // centre courant (dynamique via WorldCenter en rebuild)
+                this,
+                Quaternion.identity,     // pas de rotation par chunk (grille axis-aligned locale)
+                FaceIndex.PosY,          // valeur factice (non utilisée en mode non-radial)
+                blockMaterials,
+                oobProvider:        oob,
+                preGeneratedData:   chunkData,
+                useRadialOrientation: false);   // ← clé : pas de logique radiale sur petits astéroïdes
 
             _chunks[coord] = cr;
+
+            // Compte les triangles pour le log diagnostic.
+            var mf = go.GetComponent<MeshFilter>();
+            return (mf != null && mf.sharedMesh != null)
+                ? mf.sharedMesh.triangles.Length / 3
+                : 0;
+        }
+
+        private static bool IsChunkAllAir(ChunkData data)
+        {
+            int w = data.Width, h = data.Height;
+            for (int z = 0; z < w; z++)
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                if (data.GetBlock(x, y, z) != (byte)BlockType.Air) return false;
+            return true;
+        }
+
+        private Material GetFallbackMaterial()
+        {
+            if (_fallbackMaterial == null)
+                _fallbackMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+            return _fallbackMaterial;
         }
     }
 }
