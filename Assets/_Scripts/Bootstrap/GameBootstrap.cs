@@ -538,28 +538,36 @@ namespace AstroVoxel.Bootstrap
         /// </summary>
         private static void BuildNetworkManager()
         {
-            // NetworkManager + UnityTransport
-            var nmGO = new GameObject("NetworkManager");
-            var nm   = nmGO.AddComponent<NetworkManager>();
-            nm.NetworkConfig = new NetworkConfig(); // champ non initialisé par défaut (runtime AddComponent)
-            var transport = nmGO.AddComponent<UnityTransport>();
-            nm.NetworkConfig.NetworkTransport = transport;
+            // NGO appelle DontDestroyOnLoad sur le NetworkManager en interne :
+            // il survit aux rechargements de scène. Ne le recréer qu'une seule fois.
+            if (NetworkManager.Singleton == null)
+            {
+                // NetworkManager + UnityTransport
+                var nmGO = new GameObject("NetworkManager");
+                var nm   = nmGO.AddComponent<NetworkManager>();
+                nm.NetworkConfig = new NetworkConfig(); // champ non initialisé par défaut (runtime AddComponent)
+                var transport = nmGO.AddComponent<UnityTransport>();
+                nm.NetworkConfig.NetworkTransport = transport;
 
-            // PlayerPrefab : NetworkObject léger (PlayerNetworkSync crée les visuels à l'spawn)
-            var playerNetPrefab = new GameObject("PlayerNetPrefab");
-            playerNetPrefab.SetActive(false); // template inactif
-            var netObj = playerNetPrefab.AddComponent<NetworkObject>();
-            ForceNetworkObjectHash(netObj, "av.player.v1");
-            playerNetPrefab.AddComponent<PlayerNetworkSync>();
-            DontDestroyOnLoad(playerNetPrefab);
+                // PlayerPrefab : NetworkObject léger (PlayerNetworkSync crée les visuels à l'spawn)
+                var playerNetPrefab = new GameObject("PlayerNetPrefab");
+                playerNetPrefab.SetActive(false); // template inactif
+                var netObj = playerNetPrefab.AddComponent<NetworkObject>();
+                ForceNetworkObjectHash(netObj, "av.player.v1");
+                playerNetPrefab.AddComponent<PlayerNetworkSync>();
+                DontDestroyOnLoad(playerNetPrefab);
 
-            nm.NetworkConfig.PlayerPrefab = playerNetPrefab;
-            // Enregistrer aussi dans la liste Prefabs (requis par NGO 2.x pour la validation du spawn)
-            nm.NetworkConfig.Prefabs.Add(new Unity.Netcode.NetworkPrefab { Prefab = playerNetPrefab });
+                nm.NetworkConfig.PlayerPrefab = playerNetPrefab;
+                // Enregistrer aussi dans la liste Prefabs (requis par NGO 2.x pour la validation du spawn)
+                nm.NetworkConfig.Prefabs.Add(new Unity.Netcode.NetworkPrefab { Prefab = playerNetPrefab });
+            }
 
-            // Singleton managers
-            new GameObject("ServerManager").AddComponent<ServerManager>();
-            new GameObject("BlockSyncManager").AddComponent<BlockSyncManager>();
+            // ServerManager et BlockSyncManager sont liés à la scène (détruits au rechargement) :
+            // les recréer si nécessaire.
+            if (ServerManager.Instance == null)
+                new GameObject("ServerManager").AddComponent<ServerManager>();
+            if (BlockSyncManager.Instance == null)
+                new GameObject("BlockSyncManager").AddComponent<BlockSyncManager>();
         }
 
         /// <summary>
