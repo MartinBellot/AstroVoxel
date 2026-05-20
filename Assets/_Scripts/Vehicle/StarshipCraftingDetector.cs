@@ -37,6 +37,8 @@ namespace AstroVoxel.Vehicle
         public static Func<Vector3, Quaternion, IVoxelWorld, SpaceShipController> SpawnShip;
 
         private bool _isCrafting;
+        // Vrai quand ce CLIENT a envoyé une requête de craft et attend le broadcast en retour.
+        private bool _pendingOwnCraft;
 
         // ── Initialisation ────────────────────────────────────
 
@@ -164,7 +166,7 @@ namespace AstroVoxel.Vehicle
         /// Applique le craft : casse les 19 blocs, lance les particules, crée le vaisseau.
         /// Appelé directement en solo/host et sur réception du broadcast côté client.
         /// </summary>
-        public void ApplyCraft(Vector3 diamondPos, Vector3 sideAxis, Vector3 frontAxis, IVoxelWorld world)
+        public void ApplyCraft(Vector3 diamondPos, Vector3 sideAxis, Vector3 frontAxis, IVoxelWorld world, bool withPlayerRefs = true)
         {
             _isCrafting = true;
 
@@ -193,10 +195,10 @@ namespace AstroVoxel.Vehicle
             ChunkRenderer centerCr = world.GetChunkAt(diamondPos);
             Vector3 up = centerCr != null ? centerCr.transform.up : center.normalized;
 
-            StartCoroutine(CoSpawnEffectAndShip(center, up, frontAxis, world));
+            StartCoroutine(CoSpawnEffectAndShip(center, up, frontAxis, world, withPlayerRefs));
         }
 
-        private IEnumerator CoSpawnEffectAndShip(Vector3 center, Vector3 up, Vector3 frontAxis, IVoxelWorld world)
+        private IEnumerator CoSpawnEffectAndShip(Vector3 center, Vector3 up, Vector3 frontAxis, IVoxelWorld world, bool withPlayerRefs)
         {
             SpawnCraftParticles(center, up);
             yield return new WaitForSeconds(0.65f);
@@ -207,7 +209,14 @@ namespace AstroVoxel.Vehicle
                 Quaternion shipRot = Quaternion.LookRotation(-frontAxis, up);
                 var newShip = SpawnShip(shipPos, shipRot, world);
                 if (newShip != null)
-                    ServerManager.Instance?.SetShip(newShip);
+                {
+                    if (!withPlayerRefs)
+                        // Vaisseau appartenant à un autre joueur : non-pilotable localement
+                        newShip.SetPlayerReferences(null, null);
+                    else
+                        // Vaisseau local : on met à jour la référence dans ServerManager
+                        ServerManager.Instance?.SetShip(newShip);
+                }
             }
 
             _isCrafting = false;
@@ -341,6 +350,7 @@ namespace AstroVoxel.Vehicle
 
         private void SendShipCraftRequest(Vector3 diamondPos, byte orientation)
         {
+            _pendingOwnCraft = true;  // Ce client est l'auteur du prochain broadcast
             using var w = new FastBufferWriter(16, Allocator.Temp);
             w.WriteValueSafe(diamondPos);
             w.WriteValueSafe(orientation);
@@ -391,8 +401,12 @@ namespace AstroVoxel.Vehicle
             IVoxelWorld world = FindWorldAt(diamondPos);
             if (world == null) return;
 
+            // Détermine si ce client est l'auteur du craft (il avait envoyé la requête)
+            bool isOwnCraft = _pendingOwnCraft;
+            _pendingOwnCraft = false;
+
             var (sideAxis, frontAxis) = DecodeOrientation(orientation, diamondPos, world);
-            ApplyCraft(diamondPos, sideAxis, frontAxis, world);
+            ApplyCraft(diamondPos, sideAxis, frontAxis, world, withPlayerRefs: isOwnCraft);
         }
     }
 }

@@ -332,7 +332,9 @@ namespace AstroVoxel.Vehicle
             if (!_piloting)
             {
                 // Permettre l'embarquement si le joueur est proche et presse F
+                // !IsAnyShipPiloted : évite d'embarquer un 2e vaisseau dans le même frame
                 if (_player != null
+                    && !IsAnyShipPiloted
                     && Vector3.Distance(transform.position, _player.position) <= boardingRadius
                     && GetKeyDown_Board()
                     && !AstroVoxel.Network.ServerManager.IsShipPilotedByRemote(ShipId))
@@ -536,6 +538,7 @@ namespace AstroVoxel.Vehicle
         /// <summary>Le joueur monte dans le vaisseau.</summary>
         public void Board()
         {
+            if (IsAnyShipPiloted) return; // Garde : un seul vaisseau piloté à la fois
             _piloting        = true;
             IsAnyShipPiloted = true;
             ActiveShip       = this;

@@ -398,32 +398,21 @@ namespace AstroVoxel.Network
             SendWorldDone(clientId);
 
             // 4. Synchronisation des vaisseaux présents
-            //    - ShipId 0 : le client l'a déjà, on recale juste la position
+            //    - ShipId 0 : le client en a déjà un, on ne recale PAS la position (évite
+            //      de marquer IsShipPilotedByRemote(0) = true et de bloquer l'embarquement)
             //    - ShipId > 0 : le client ne les a pas encore, on les envoie via MsgShipSpawn
             foreach (var ship in SpaceShipController.AllShips)
             {
                 if (ship == null || !ship.gameObject.activeInHierarchy) continue;
-                if (ship.ShipId == 0)
-                {
-                    using var w2 = new FastBufferWriter(44, Allocator.Temp);
-                    w2.WriteValueSafe(ship.ShipId);
-                    w2.WriteValueSafe(ship.transform.position);
-                    w2.WriteValueSafe(ship.transform.rotation);
-                    w2.WriteValueSafe(0f);       // speed = 0
-                    w2.WriteValueSafe((byte)0);  // flags = 0
-                    nm.CustomMessagingManager.SendNamedMessage(
-                        MsgShipPos, clientId, w2, NetworkDelivery.ReliableSequenced);
-                }
-                else
-                {
-                    // Envoyer spawn : clientId n'a pas ce vaisseau, il doit le créer
-                    using var w2 = new FastBufferWriter(32, Allocator.Temp);
-                    w2.WriteValueSafe(ship.ShipId);
-                    w2.WriteValueSafe(ship.transform.position);
-                    w2.WriteValueSafe(ship.transform.rotation);
-                    nm.CustomMessagingManager.SendNamedMessage(
-                        MsgShipSpawn, clientId, w2, NetworkDelivery.ReliableSequenced);
-                }
+                if (ship.ShipId == 0) continue; // Le client crée son propre ship 0 au démarrage
+
+                // Envoyer spawn : clientId n'a pas ce vaisseau, il doit le créer
+                using var w2 = new FastBufferWriter(32, Allocator.Temp);
+                w2.WriteValueSafe(ship.ShipId);
+                w2.WriteValueSafe(ship.transform.position);
+                w2.WriteValueSafe(ship.transform.rotation);
+                nm.CustomMessagingManager.SendNamedMessage(
+                    MsgShipSpawn, clientId, w2, NetworkDelivery.ReliableSequenced);
             }
         }
 
@@ -685,7 +674,7 @@ namespace AstroVoxel.Network
                 existing.transform.position = pos;
                 existing.transform.rotation = rot;
                 var existRb = existing.GetComponent<Rigidbody>();
-                if (existRb != null) { existRb.velocity = Vector3.zero; existRb.angularVelocity = Vector3.zero; }
+                if (existRb != null) { existRb.linearVelocity = Vector3.zero; existRb.angularVelocity = Vector3.zero; }
                 return;
             }
 
@@ -694,8 +683,12 @@ namespace AstroVoxel.Network
             if (factory != null)
             {
                 var newShip = factory(pos, rot, null); // null → defaultWorld dans la delegate
-                // Forcer l'ID reçu du host : évite tout désync si _nextShipId diffère côté client
-                newShip?.ForceShipId(shipId);
+                if (newShip != null)
+                {
+                    newShip.ForceShipId(shipId);
+                    // Vaisseau distant : pas de références joueur local → non-pilotable par ce client
+                    newShip.SetPlayerReferences(null, null);
+                }
             }
         }
 
