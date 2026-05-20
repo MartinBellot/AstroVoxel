@@ -123,13 +123,13 @@ namespace AstroVoxel.Network
             nm.OnClientConnectedCallback  += OnClientConnectedAsHost;
             nm.OnClientDisconnectCallback += OnClientDisconnected;
 
-            RegisterHandlers();
-
             if (!nm.StartHost())
             {
                 OnError?.Invoke("Échec du démarrage (port occupé ?).");
                 return;
             }
+
+            RegisterHandlers();
 
             _currentCode = EncodeIP(ip, Port);
             OnHostReady?.Invoke(_currentCode);
@@ -159,13 +159,13 @@ namespace AstroVoxel.Network
             nm.OnClientConnectedCallback  += OnClientConnectedAsClient;
             nm.OnClientDisconnectCallback += OnClientDisconnected;
 
-            RegisterHandlers();
-
             if (!nm.StartClient())
             {
                 OnError?.Invoke($"Échec de la connexion à {ip}:{port}.");
                 return;
             }
+
+            RegisterHandlers();
 
             OnStatusMessage?.Invoke($"Connexion à {ip}:{port}…");
         }
@@ -229,9 +229,9 @@ namespace AstroVoxel.Network
                 yield break;
             }
 
-            // 2. Modifications de blocs en batches de 64
+            // 2. Modifications de blocs en batches de 32
             var mods = _world.GetModifications();
-            const int BatchSize = 64;
+            const int BatchSize = 32;
 
             for (int i = 0; i < mods.Count; i += BatchSize)
             {
@@ -258,7 +258,7 @@ namespace AstroVoxel.Network
                     BlockChangeData.Write(ref w, d);
                 }
                 nm.CustomMessagingManager.SendNamedMessage(
-                    MsgWorldMod, clientId, w, NetworkDelivery.ReliableSequenced);
+                    MsgWorldMod, clientId, w, NetworkDelivery.ReliableFragmentedSequenced);
                 w.Dispose();
                 yield return null; // étale les paquets
             }

@@ -554,6 +554,8 @@ namespace AstroVoxel.Bootstrap
             DontDestroyOnLoad(playerNetPrefab);
 
             nm.NetworkConfig.PlayerPrefab = playerNetPrefab;
+            // Enregistrer aussi dans la liste Prefabs (requis par NGO 2.x pour la validation du spawn)
+            nm.NetworkConfig.Prefabs.Add(new Unity.Netcode.NetworkPrefab { Prefab = playerNetPrefab });
 
             // Singleton managers
             new GameObject("ServerManager").AddComponent<ServerManager>();
