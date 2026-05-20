@@ -167,6 +167,12 @@ namespace AstroVoxel.Vehicle
         /// <summary>Cible de vitesse angulaire locale (rad/s), interpolée chaque FixedUpdate.</summary>
         private Vector3 _targetLocalAngVel;
 
+        // ── État particulaire réseau (piloté par un joueur distant) ──────
+        private float _remoteSpeed;
+        private bool  _remoteVertical;
+        private bool  _remoteWingTrail;
+        private bool  _hasRemoteParticleState;
+
         // ── Propriétés publiques ──────────────────────────────
 
         /// <summary>Vrai si le joueur est actuellement aux commandes.</summary>
@@ -198,6 +204,9 @@ namespace AstroVoxel.Vehicle
 
         /// <summary>Vrai si la poussée verticale (Espace) est active.</summary>
         public bool IsVerticalThrustActive => _piloting && GetVerticalThrust() > 0.1f;
+
+        /// <summary>Vrai si les trainées d'aile sont actives (boost + avance).</summary>
+        public bool IsWingTrailActive => _piloting && GetBoost() && GetForward() > 0.1f;
 
         /// <summary>Altitude au-dessus de la surface planétaire (unités).</summary>
         public float Altitude
@@ -282,6 +291,18 @@ namespace AstroVoxel.Vehicle
         /// Câble la référence PlanetWorld pour le chargement des chunks.
         /// </summary>
         public void SetPlanetWorld(PlanetWorld world) => _world = world;
+
+        /// <summary>
+        /// Applique l'état de particules reçu du réseau.
+        /// Appelé par ServerManager quand ce vaisseau est piloté par un joueur distant.
+        /// </summary>
+        public void SetRemoteThrusterState(float speed, bool vertical, bool wingTrail)
+        {
+            _remoteSpeed            = speed;
+            _remoteVertical         = vertical;
+            _remoteWingTrail        = wingTrail;
+            _hasRemoteParticleState = true;
+        }
 
         private void Update()
         {
@@ -855,8 +876,9 @@ namespace AstroVoxel.Vehicle
         {
             if (thrusterParticles == null) return;
 
-            // Rampe quadratique : rien à l'arrêt, plein régime à trailMaxSpeed
-            float t    = Mathf.Clamp01(Speed / trailMaxSpeed);
+            // Utilise la vitesse réseau quand piloté à distance, sinon la vitesse physique locale
+            float speed = (_hasRemoteParticleState && !_piloting) ? _remoteSpeed : Speed;
+            float t    = Mathf.Clamp01(speed / trailMaxSpeed);
             float rate = t * t * 260f;
 
             foreach (var ps in thrusterParticles)
@@ -1036,7 +1058,9 @@ namespace AstroVoxel.Vehicle
         {
             if (verticalThrusterParticles == null) return;
 
-            bool active = _piloting && GetVerticalThrust() > 0.1f;
+            bool active = (_hasRemoteParticleState && !_piloting)
+                ? _remoteVertical
+                : (_piloting && GetVerticalThrust() > 0.1f);
 
             foreach (var ps in verticalThrusterParticles)
             {
@@ -1051,12 +1075,23 @@ namespace AstroVoxel.Vehicle
 
         private void UpdateWingTrails()
         {
-            bool boostActive = _piloting && GetBoost();
-            float fwd        = _piloting ? GetForward() : 0f;
-            // Les trainées s'activent uniquement si on avance en mode boost
-            bool wingActive = boostActive && fwd > 0.1f;
+            bool  wingActive;
+            float t;
 
-            float t    = wingActive ? Mathf.Clamp01(Speed / trailMaxSpeed) : 0f;
+            if (_hasRemoteParticleState && !_piloting)
+            {
+                wingActive = _remoteWingTrail;
+                t          = wingActive ? Mathf.Clamp01(_remoteSpeed / trailMaxSpeed) : 0f;
+            }
+            else
+            {
+                bool boostActive = _piloting && GetBoost();
+                float fwd        = _piloting ? GetForward() : 0f;
+                // Les trainées s'activent uniquement si on avance en mode boost
+                wingActive = boostActive && fwd > 0.1f;
+                t          = wingActive ? Mathf.Clamp01(Speed / trailMaxSpeed) : 0f;
+            }
+
             float rate = wingActive ? Mathf.Lerp(40f, 130f, t * t) : 0f;
 
             SetWingTrailRate(wingTrailLeft,  rate, t);

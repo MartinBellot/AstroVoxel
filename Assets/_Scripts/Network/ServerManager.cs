@@ -308,9 +308,15 @@ namespace AstroVoxel.Network
             if (_shipSyncTimer < ShipSyncInterval) return;
             _shipSyncTimer = 0f;
 
-            using var w = new FastBufferWriter(32, Allocator.Temp);
+            float speed = _ship.Speed;
+            byte  flags = (byte)((_ship.IsVerticalThrustActive ? 1 : 0)
+                                | (_ship.IsWingTrailActive      ? 2 : 0));
+
+            using var w = new FastBufferWriter(40, Allocator.Temp);
             w.WriteValueSafe(_ship.transform.position);
             w.WriteValueSafe(_ship.transform.rotation);
+            w.WriteValueSafe(speed);
+            w.WriteValueSafe(flags);
 
             var nm = NetworkManager.Singleton;
             if (nm == null) return;
@@ -427,9 +433,12 @@ namespace AstroVoxel.Network
             _lastShipPosReceived = Time.time;
             reader.ReadValueSafe(out Vector3 pos);
             reader.ReadValueSafe(out Quaternion rot);
+            reader.ReadValueSafe(out float speed);
+            reader.ReadValueSafe(out byte  flags);
             _targetShipPos       = pos;
             _targetShipRot       = rot;
             _hasRemoteShipTarget = true;
+            _ship.SetRemoteThrusterState(speed, (flags & 1) != 0, (flags & 2) != 0);
         }
 
         // Reçu par le SERVEUR depuis un CLIENT qui pilote : relayer aux autres
@@ -438,17 +447,22 @@ namespace AstroVoxel.Network
             if (!NetworkManager.Singleton.IsServer) return;
             reader.ReadValueSafe(out Vector3 pos);
             reader.ReadValueSafe(out Quaternion rot);
+            reader.ReadValueSafe(out float speed);
+            reader.ReadValueSafe(out byte  flags);
             // Stocker la cible → appliquée en Update pour un mouvement fluide
             if (_ship != null && !_ship.IsPiloting)
             {
                 _targetShipPos       = pos;
                 _targetShipRot       = rot;
                 _hasRemoteShipTarget = true;
+                _ship.SetRemoteThrusterState(speed, (flags & 1) != 0, (flags & 2) != 0);
             }
-            // Relay to all other clients
-            using var w = new FastBufferWriter(32, Allocator.Temp);
+            // Relay to all other clients (avec vitesse + flags)
+            using var w = new FastBufferWriter(40, Allocator.Temp);
             w.WriteValueSafe(pos);
             w.WriteValueSafe(rot);
+            w.WriteValueSafe(speed);
+            w.WriteValueSafe(flags);
             foreach (var clientId in NetworkManager.Singleton.ConnectedClientsIds)
             {
                 if (clientId == senderId || clientId == NetworkManager.Singleton.LocalClientId) continue;
