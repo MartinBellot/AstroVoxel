@@ -1,0 +1,1 @@
+lsof -ti udp:7777 | xargs kill -9
