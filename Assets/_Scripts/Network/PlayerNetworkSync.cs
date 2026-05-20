@@ -55,7 +55,8 @@ namespace AstroVoxel.Network
             else
             {
                 gameObject.name = $"PlayerNet_{OwnerClientId}";
-                BuildRemoteCapsule();
+                BuildRemoteCapsule();      // appelle aussi BuildNameTag() en interne
+                SnapToNetworkPosition();   // snap immédiat à la position réseau
             }
         }
 
@@ -83,11 +84,21 @@ namespace AstroVoxel.Network
             }
             else if (_remoteCapsule != null)
             {
-                // Interpole vers la position synchronisée (20 lerps/s max)
-                _remoteCapsule.transform.position = Vector3.Lerp(
-                    _remoteCapsule.transform.position, _netPos.Value, Time.deltaTime * 15f);
-                _remoteCapsule.transform.rotation = Quaternion.Slerp(
-                    _remoteCapsule.transform.rotation, _netRot.Value, Time.deltaTime * 15f);
+                // Téléporte si trop loin (spawn ou grands déplacements)
+                float sqrDist = (_remoteCapsule.transform.position - _netPos.Value).sqrMagnitude;
+                if (sqrDist > 100f)
+                {
+                    _remoteCapsule.transform.position = _netPos.Value;
+                    _remoteCapsule.transform.rotation = _netRot.Value;
+                }
+                else
+                {
+                    // Interpole chaque frame pour un mouvement fluide
+                    _remoteCapsule.transform.position = Vector3.Lerp(
+                        _remoteCapsule.transform.position, _netPos.Value, Time.deltaTime * 15f);
+                    _remoteCapsule.transform.rotation = Quaternion.Slerp(
+                        _remoteCapsule.transform.rotation, _netRot.Value, Time.deltaTime * 15f);
+                }
 
                 // Orienter le nametag vers la caméra (à 10 Hz)
                 _nameFaceCamTimer += Time.deltaTime;
@@ -169,6 +180,15 @@ namespace AstroVoxel.Network
             bgRT.offsetMax = new Vector2( 4f,  2f);
         }
 
+        // ── Positionnement initial après spawn ────────────────
+        // La NetworkVariable est déjà répliquée à la spawn → on snap directement.
+        private void SnapToNetworkPosition()
+        {
+            if (_remoteCapsule == null) return;
+            _remoteCapsule.transform.position = _netPos.Value;
+            _remoteCapsule.transform.rotation = _netRot.Value;
+        }
+
         private void FaceNameTagToCamera()
         {
             var cam = Camera.main;
@@ -186,9 +206,15 @@ namespace AstroVoxel.Network
         {
             var rend = go.GetComponent<Renderer>();
             if (rend == null) return;
-            var shader = Shader.Find("AstroVoxel/BlockUnlit")
-                      ?? Shader.Find("Universal Render Pipeline/Lit");
-            rend.sharedMaterial = new Material(shader) { color = color };
+            var shader = Shader.Find("Universal Render Pipeline/Lit")
+                      ?? Shader.Find("Universal Render Pipeline/Unlit")
+                      ?? Shader.Find("Standard");
+            if (shader == null) return;
+            var mat = new Material(shader);
+            // Compatibilité URP (_BaseColor) et Standard (_Color)
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", color);
+            if (mat.HasProperty("_Color"))     mat.SetColor("_Color",     color);
+            rend.material = mat; // material d'instance (pas partagé)
         }
     }
 }

@@ -71,9 +71,14 @@ namespace AstroVoxel.Network
         private const string B36   = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
         // ── Ship sync ─────────────────────────────────────────
-        private float _shipSyncTimer;
-        private float _lastShipPosReceived = -100f;
-        private const float ShipSyncInterval = 0.05f; // 20 Hz
+        private float      _shipSyncTimer;
+        private float      _lastShipPosReceived = -100f;
+        private const float ShipSyncInterval    = 0.05f; // 20 Hz
+
+        // Cible d'interpolation (mis à jour dans les handlers, consommé dans Update)
+        private Vector3    _targetShipPos;
+        private Quaternion _targetShipRot       = Quaternion.identity;
+        private bool       _hasRemoteShipTarget;
 
         /// <summary>True quand un autre joueur (distant) pilote le vaisseau.</summary>
         public static bool IsShipPilotedByRemote =>
@@ -93,10 +98,29 @@ namespace AstroVoxel.Network
             if (Instance == this) Instance = null;
         }
 
+        private void OnApplicationQuit()
+        {
+            // Force la fermeture du socket UDP avant que le process se termine.
+            // Sans ça, le port 7777 reste occupé entre deux sessions Play Mode.
+            var nm = NetworkManager.Singleton;
+            if (nm != null && nm.IsListening)
+                nm.Shutdown();
+        }
+
         private void Update()
         {
-            if (!IsNetworkActive || _ship == null) return;
-            SyncShipIfPiloting();
+            if (!IsNetworkActive) return;
+            if (_ship != null) SyncShipIfPiloting();
+
+            // Interpolation fluide du vaisseau quand piloté par un joueur distant
+            // (lerp chaque frame à 60 Hz au lieu de seulement lors de la réception du paquet)
+            if (_hasRemoteShipTarget && _ship != null && !_ship.IsPiloting)
+            {
+                _ship.transform.position = Vector3.Lerp(
+                    _ship.transform.position, _targetShipPos, Time.deltaTime * 25f);
+                _ship.transform.rotation = Quaternion.Slerp(
+                    _ship.transform.rotation, _targetShipRot, Time.deltaTime * 25f);
+            }
         }
 
         // ── Init ─────────────────────────────────────────────
@@ -395,7 +419,7 @@ namespace AstroVoxel.Network
             }
         }
 
-        // Reçu par les CLIENTS depuis le host : appliquer position vaisseau
+        // Reçu par les CLIENTS depuis le host : stocker la cible (interpolée dans Update)
         private void HandleShipPos(ulong senderId, FastBufferReader reader)
         {
             if (NetworkManager.Singleton.IsServer || _ship == null) return;
@@ -403,8 +427,9 @@ namespace AstroVoxel.Network
             _lastShipPosReceived = Time.time;
             reader.ReadValueSafe(out Vector3 pos);
             reader.ReadValueSafe(out Quaternion rot);
-            _ship.transform.position = Vector3.Lerp(_ship.transform.position, pos, Time.deltaTime * 20f);
-            _ship.transform.rotation = Quaternion.Slerp(_ship.transform.rotation, rot, Time.deltaTime * 20f);
+            _targetShipPos       = pos;
+            _targetShipRot       = rot;
+            _hasRemoteShipTarget = true;
         }
 
         // Reçu par le SERVEUR depuis un CLIENT qui pilote : relayer aux autres
@@ -413,11 +438,12 @@ namespace AstroVoxel.Network
             if (!NetworkManager.Singleton.IsServer) return;
             reader.ReadValueSafe(out Vector3 pos);
             reader.ReadValueSafe(out Quaternion rot);
-            // Apply locally on host
+            // Stocker la cible → appliquée en Update pour un mouvement fluide
             if (_ship != null && !_ship.IsPiloting)
             {
-                _ship.transform.position = Vector3.Lerp(_ship.transform.position, pos, Time.deltaTime * 20f);
-                _ship.transform.rotation = Quaternion.Slerp(_ship.transform.rotation, rot, Time.deltaTime * 20f);
+                _targetShipPos       = pos;
+                _targetShipRot       = rot;
+                _hasRemoteShipTarget = true;
             }
             // Relay to all other clients
             using var w = new FastBufferWriter(32, Allocator.Temp);

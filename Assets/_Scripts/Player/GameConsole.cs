@@ -314,7 +314,10 @@ namespace AstroVoxel.Player
                 case "host":
                     Push($"<color=#{H(_sub)}>Démarrage du serveur…</color>");
                     sm.OnHostReady    += code =>
-                        PushOk($"Serveur actif ! Code : <b><color=#{H(_blue)}>{code}</color></b>  — partagez-le à vos amis.");
+                    {
+                        GUIUtility.systemCopyBuffer = code;
+                        PushOk($"Serveur actif ! Code : <b><color=#{H(_blue)}>{code}</color></b>  — copié dans le presse-papier.");
+                    };
                     sm.OnError        += msg => PushErr(msg);
                     sm.OnStatusMessage+= msg => Push($"<color=#{H(_sub)}>{Esc(msg)}</color>");
                     sm.HostServer();
