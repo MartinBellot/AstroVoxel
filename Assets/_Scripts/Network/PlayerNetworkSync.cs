@@ -3,9 +3,10 @@
 //  Proxy de position pour chaque joueur connecté.
 //  MonoBehaviour simple géré par ServerManager — aucun NGO PlayerPrefab.
 //
-//  - isLocal = true  : joueur local, envoie sa position via CustomMessaging.
-//  - isLocal = false : joueur distant, reçoit les positions et anime un
-//    mannequin capsule + nametag représentant le joueur.
+//  - isLocal = true  : joueur local, envoie sa position + pitch caméra + vitesse.
+//  - isLocal = false : joueur distant, reçoit les données et anime un
+//    mannequin Minecraft-like (corps cubique, tête qui suit le regard,
+//    corps avec délai de rotation, animation de marche/course) + nametag.
 // ============================================================
 
 using System.Collections.Generic;
@@ -33,6 +34,11 @@ namespace AstroVoxel.Network
         private Quaternion _remoteTargetRot = Quaternion.identity;
         private bool       _hasRemotePosition;
 
+        // Données d'animation distantes
+        private float      _remoteHeadPitch;           // pitch caméra (degrés)
+        private float      _remoteSpeed;               // vitesse horizontale (m/s)
+        private Quaternion _remoteBodyRot = Quaternion.identity; // yaw corps (laggy)
+
         // ── Timer d'envoi de position (local) ─────────────────
         private float      _syncTimer;
         private const float SyncInterval = 0.1f; // 10 Hz
@@ -40,16 +46,26 @@ namespace AstroVoxel.Network
         // ── État embarqué ─────────────────────────────────────
         private bool _inShip;
 
-        // ── Références ────────────────────────────────────────
+        // ── Références locales ────────────────────────────────
         private Transform  _localPlayerTransform;
-        private GameObject _remoteCapsule;
+        private Transform  _localCameraTransform;
+        private Rigidbody  _localRigidbody;
+
+        // ── Références mannequin ──────────────────────────────
+        private GameObject _remoteCapsule;   // racine (position seule)
+        private Transform  _bodyPivot;       // pivot corps (yaw avec délai)
+        private Transform  _headPivot;       // pivot tête (yaw+pitch instantané)
+        private Transform  _armLPivot;       // pivot épaule gauche
+        private Transform  _armRPivot;       // pivot épaule droite
+        private Transform  _legLPivot;       // pivot hanche gauche
+        private Transform  _legRPivot;       // pivot hanche droite
+
         private Text       _nameText;
+        private float      _walkCycle;       // accumulateur animation de marche
+
+        // Nametag orientation
         private float      _nameFaceCamTimer;
         private const float NameFaceInterval = 0.1f;
-
-        // Palette Dark Theme cohérente
-        private static readonly Color _bodyColor = new Color(0.30f, 0.55f, 1.00f);
-        private static readonly Color _headColor = new Color(0.38f, 0.62f, 1.00f);
 
         // ── Initialisation explicite (appelée par ServerManager) ──
 
@@ -61,8 +77,7 @@ namespace AstroVoxel.Network
 
             if (isLocal)
             {
-                var pc = FindAnyObjectByType<AstroVoxel.Player.PlayerController>();
-                if (pc != null) _localPlayerTransform = pc.transform;
+                CacheLocalRefs();
                 gameObject.name = "PlayerNet_Local";
             }
             else
@@ -70,6 +85,16 @@ namespace AstroVoxel.Network
                 gameObject.name = $"PlayerNet_{clientId}";
                 BuildRemoteCapsule();
             }
+        }
+
+        private void CacheLocalRefs()
+        {
+            var pc = FindAnyObjectByType<AstroVoxel.Player.PlayerController>();
+            if (pc == null) return;
+            _localPlayerTransform = pc.transform;
+            _localRigidbody       = pc.GetComponent<Rigidbody>();
+            var camComp = pc.GetComponentInChildren<AstroVoxel.Player.PlayerCamera>();
+            _localCameraTransform = camComp != null ? camComp.transform : Camera.main?.transform;
         }
 
         /// <summary>Supprime le sync et le mannequin associé.</summary>
@@ -103,14 +128,27 @@ namespace AstroVoxel.Network
 
         // ── API publique : appelée par ServerManager ──────────
 
-        public void SetRemotePosition(Vector3 pos, Quaternion rot, bool inShip)
+        public void SetRemotePosition(Vector3 pos, Quaternion rot, float headPitch, float speed, bool inShip)
         {
             if (_isLocal) return;
-            _remoteTargetPos   = pos;
-            _remoteTargetRot   = rot;
+            _remoteTargetPos = pos;
+            _remoteTargetRot = rot;
+            _remoteHeadPitch = headPitch;
+            _remoteSpeed     = speed;
+
+            // Premier paquet : snap immédiat, pas de lag initial
+            if (!_hasRemotePosition)
+            {
+                _remoteBodyRot = rot;
+                if (_remoteCapsule != null)
+                {
+                    _remoteCapsule.transform.position = pos;
+                    _remoteCapsule.transform.rotation = rot;
+                }
+            }
             _hasRemotePosition = true;
 
-            // Cacher / montrer la capsule selon l'état embarqué
+            // Cacher / montrer le mannequin selon l'état embarqué
             if (_remoteCapsule != null)
             {
                 bool shouldShow = !inShip;
@@ -126,10 +164,29 @@ namespace AstroVoxel.Network
             var nm = NetworkManager.Singleton;
             if (nm == null) return;
 
-            using var w = new FastBufferWriter(41, Allocator.Temp);
+            // Pitch de la caméra locale (converti en [-180, 180])
+            float headPitch = 0f;
+            if (_localCameraTransform != null)
+            {
+                headPitch = _localCameraTransform.localEulerAngles.x;
+                if (headPitch > 180f) headPitch -= 360f;
+            }
+
+            // Vitesse horizontale projetée sur le plan tangent à la planète
+            float speed = 0f;
+            if (_localRigidbody != null)
+            {
+                Vector3 up = _localPlayerTransform.up;
+                speed = Vector3.ProjectOnPlane(_localRigidbody.linearVelocity, up).magnitude;
+            }
+
+            // Buffer : clientId(8) + pos(12) + rot(16) + headPitch(4) + speed(4) + inShip(1) = 45 B
+            using var w = new FastBufferWriter(48, Allocator.Temp);
             w.WriteValueSafe(_clientId);
             w.WriteValueSafe(_localPlayerTransform.position);
             w.WriteValueSafe(_localPlayerTransform.rotation);
+            w.WriteValueSafe(headPitch);
+            w.WriteValueSafe(speed);
             w.WriteValueSafe((byte)(_inShip ? 1 : 0));
 
             if (nm.IsServer)
@@ -160,8 +217,7 @@ namespace AstroVoxel.Network
             {
                 if (_localPlayerTransform == null)
                 {
-                    var pc = FindAnyObjectByType<AstroVoxel.Player.PlayerController>();
-                    if (pc != null) _localPlayerTransform = pc.transform;
+                    CacheLocalRefs();
                     return;
                 }
 
@@ -186,20 +242,8 @@ namespace AstroVoxel.Network
             }
             else if (_remoteCapsule != null && _hasRemotePosition)
             {
-                // Téléporte si > 5 unités, sinon lerp fluide
-                float sqrDist = (_remoteCapsule.transform.position - _remoteTargetPos).sqrMagnitude;
-                if (sqrDist > 25f)
-                {
-                    _remoteCapsule.transform.position = _remoteTargetPos;
-                    _remoteCapsule.transform.rotation = _remoteTargetRot;
-                }
-                else
-                {
-                    _remoteCapsule.transform.position = Vector3.Lerp(
-                        _remoteCapsule.transform.position, _remoteTargetPos, Time.deltaTime * 15f);
-                    _remoteCapsule.transform.rotation = Quaternion.Slerp(
-                        _remoteCapsule.transform.rotation, _remoteTargetRot, Time.deltaTime * 15f);
-                }
+                UpdateRemotePosition();
+                UpdateRemoteAnimation();
 
                 // Orienter le nametag vers la caméra (à 10 Hz)
                 _nameFaceCamTimer += Time.deltaTime;
@@ -211,39 +255,192 @@ namespace AstroVoxel.Network
             }
         }
 
-        // ── Mannequin distant ─────────────────────────────────
+        // ── Interpolation position + rotations séparées ───────
+
+        private void UpdateRemotePosition()
+        {
+            // Position : téléporte si > 5 u, sinon lerp fluide
+            float sqrDist = (_remoteCapsule.transform.position - _remoteTargetPos).sqrMagnitude;
+            if (sqrDist > 25f)
+            {
+                _remoteCapsule.transform.position = _remoteTargetPos;
+                _remoteBodyRot = _remoteTargetRot;
+            }
+            else
+            {
+                _remoteCapsule.transform.position = Vector3.Lerp(
+                    _remoteCapsule.transform.position, _remoteTargetPos, Time.deltaTime * 15f);
+            }
+
+            // Rotation racine : s'aligne rapidement sur la planète (pour que les
+            // offsets locaux des enfants soient dans le bon repère de gravité)
+            _remoteCapsule.transform.rotation = Quaternion.Slerp(
+                _remoteCapsule.transform.rotation, _remoteTargetRot, Time.deltaTime * 15f);
+
+            // Corps : suit le yaw cible avec un délai (plus lent à l'arrêt → effet Minecraft)
+            float bodySpeed = _remoteSpeed > 0.5f ? 10f : 2.5f;
+            _remoteBodyRot = Quaternion.Slerp(_remoteBodyRot, _remoteTargetRot, Time.deltaTime * bodySpeed);
+            if (_bodyPivot != null)
+                _bodyPivot.rotation = _remoteBodyRot; // rotation monde
+
+            // Tête : snap instantané sur le yaw + pitch de la caméra en espace local
+            if (_headPivot != null)
+                _headPivot.localRotation = Quaternion.Euler(_remoteHeadPitch, 0f, 0f);
+        }
+
+        // ── Animation marche / course (balancement membres) ───
+
+        private void UpdateRemoteAnimation()
+        {
+            if (_armLPivot == null) return;
+
+            if (_remoteSpeed < 0.3f)
+            {
+                // Idle : membres reviennent doucement en position neutre
+                float t   = Time.deltaTime * 8f;
+                var   idle = Quaternion.identity;
+                _armLPivot.localRotation = Quaternion.Lerp(_armLPivot.localRotation, idle, t);
+                _armRPivot.localRotation = Quaternion.Lerp(_armRPivot.localRotation, idle, t);
+                _legLPivot.localRotation = Quaternion.Lerp(_legLPivot.localRotation, idle, t);
+                _legRPivot.localRotation = Quaternion.Lerp(_legRPivot.localRotation, idle, t);
+            }
+            else
+            {
+                bool  running = _remoteSpeed > 7f;
+                float freq    = running ? 6.5f : 4.0f;  // Hz du cycle
+                float amp     = running ? 45f  : 30f;   // amplitude en degrés
+
+                _walkCycle += Time.deltaTime * freq;
+                float swing = Mathf.Sin(_walkCycle) * amp;
+
+                // Bras et jambes en opposition (style Minecraft)
+                _armLPivot.localRotation = Quaternion.Euler( swing, 0f, 0f);
+                _armRPivot.localRotation = Quaternion.Euler(-swing, 0f, 0f);
+                _legLPivot.localRotation = Quaternion.Euler(-swing, 0f, 0f);
+                _legRPivot.localRotation = Quaternion.Euler( swing, 0f, 0f);
+            }
+        }
+
+        // ── Construction du mannequin Minecraft-like ──────────
+        //
+        //  Proportions (en unités Unity, 1 u ≈ 1 bloc Minecraft) :
+        //    Pieds  y=0.00  ──  Hanches  y=0.75  ──  Épaules  y=1.50
+        //    Haut tête y=2.00  (taille totale ≈ 2 u, Steve ≈ 1.95 blocs)
+        //
+        //  Structure :
+        //    RemotePlayer_X   (racine, position seule)
+        //    ├── BodyPivot    (y=0, rotation monde = yaw laggy)
+        //    │   ├── Torso    (cube 0.50×0.75×0.25, centre y=1.125)
+        //    │   ├── ArmLPivot (pivot épaule y=1.5, x=-0.375)
+        //    │   │   └── ArmL  (cube 0.25×0.75×0.25, pendant à y=-0.375)
+        //    │   ├── ArmRPivot (pivot épaule y=1.5, x=+0.375)
+        //    │   │   └── ArmR
+        //    │   ├── LegLPivot (pivot hanche y=0.75, x=-0.125)
+        //    │   │   └── LegL  (cube 0.25×0.75×0.25, pendant à y=-0.375)
+        //    │   └── LegRPivot (pivot hanche y=0.75, x=+0.125)
+        //    │       └── LegR
+        //    ├── HeadPivot    (y=1.5 dans espace racine, localRot = pitch seul)
+        //    │   ├── Head     (cube 0.50×0.50×0.50, centre y=0.25)
+        //    │   ├── EyeL     (cube noir, face avant)
+        //    │   └── EyeR
+        //    └── NameTag      (canvas world-space, y=2.25)
 
         private void BuildRemoteCapsule()
         {
             _remoteCapsule = new GameObject($"RemotePlayer_{_clientId}");
 
-            // ── Corps (capsule) ───────────────────────────────
-            var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-            body.name = "Body";
-            body.transform.SetParent(_remoteCapsule.transform, false);
-            body.transform.localPosition = Vector3.up * 0.9f;
-            body.transform.localScale    = new Vector3(0.8f, 0.9f, 0.8f);
-            Object.Destroy(body.GetComponent<Collider>());
-            ApplyColor(body, _bodyColor);
+            // Couleur de chemise unique par joueur (répartition dorée sur la teinte)
+            float hue        = ((_clientId * 137UL) % 360UL) / 360f;
+            Color shirtColor = Color.HSVToRGB(hue, 0.65f, 0.90f);
+            Color pantsColor = Color.HSVToRGB((hue + 0.55f) % 1f, 0.70f, 0.55f);
+            Color skinColor  = new Color(0.78f, 0.55f, 0.38f);
+            Color eyeColor   = new Color(0.06f, 0.06f, 0.06f);
 
-            // ── Tête (sphère) ─────────────────────────────────
-            var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            head.name = "Head";
-            head.transform.SetParent(_remoteCapsule.transform, false);
-            head.transform.localPosition = Vector3.up * 1.85f;
-            head.transform.localScale    = Vector3.one * 0.55f;
-            Object.Destroy(head.GetComponent<Collider>());
-            ApplyColor(head, _headColor);
+            // ── BodyPivot ──────────────────────────────────────────
+            var bodyGO = new GameObject("BodyPivot");
+            bodyGO.transform.SetParent(_remoteCapsule.transform, false);
+            bodyGO.transform.localPosition = Vector3.zero;
+            bodyGO.transform.localRotation = Quaternion.identity;
+            _bodyPivot = bodyGO.transform;
 
-            // ── Nametag world-space ───────────────────────────
+            // Torse  (0.50 × 0.75 × 0.25 u)  centre y = 1.125
+            MakeBlock("Torso", bodyGO.transform,
+                new Vector3(0f, 1.125f, 0f), new Vector3(0.50f, 0.75f, 0.25f), shirtColor);
+
+            // Bras gauche — pivot à l'épaule, bras pend vers -Y local
+            var armLGO = new GameObject("ArmLPivot");
+            armLGO.transform.SetParent(bodyGO.transform, false);
+            armLGO.transform.localPosition = new Vector3(-0.375f, 1.5f, 0f);
+            _armLPivot = armLGO.transform;
+            MakeBlock("ArmL", armLGO.transform,
+                new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), shirtColor);
+
+            // Bras droit
+            var armRGO = new GameObject("ArmRPivot");
+            armRGO.transform.SetParent(bodyGO.transform, false);
+            armRGO.transform.localPosition = new Vector3(0.375f, 1.5f, 0f);
+            _armRPivot = armRGO.transform;
+            MakeBlock("ArmR", armRGO.transform,
+                new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), shirtColor);
+
+            // Jambe gauche — pivot à la hanche, jambe pend vers -Y local
+            var legLGO = new GameObject("LegLPivot");
+            legLGO.transform.SetParent(bodyGO.transform, false);
+            legLGO.transform.localPosition = new Vector3(-0.125f, 0.75f, 0f);
+            _legLPivot = legLGO.transform;
+            MakeBlock("LegL", legLGO.transform,
+                new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), pantsColor);
+
+            // Jambe droite
+            var legRGO = new GameObject("LegRPivot");
+            legRGO.transform.SetParent(bodyGO.transform, false);
+            legRGO.transform.localPosition = new Vector3(0.125f, 0.75f, 0f);
+            _legRPivot = legRGO.transform;
+            MakeBlock("LegR", legRGO.transform,
+                new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), pantsColor);
+
+            // ── HeadPivot ──────────────────────────────────────────
+            // Placé à y=1.5 (cou) dans l'espace LOCAL de la racine.
+            // La racine ayant la rotation planète, (0,1.5,0) local = 1.5 u au-dessus
+            // des pieds dans la direction "haut" de la planète. ✓
+            // Le pitch de la caméra est appliqué en localRotation (X seulement).
+            var headGO = new GameObject("HeadPivot");
+            headGO.transform.SetParent(_remoteCapsule.transform, false);
+            headGO.transform.localPosition = new Vector3(0f, 1.5f, 0f);
+            headGO.transform.localRotation = Quaternion.identity;
+            _headPivot = headGO.transform;
+
+            // Cube tête (0.50 × 0.50 × 0.50 u), centre à y=0.25 au-dessus du pivot
+            MakeBlock("Head", headGO.transform,
+                new Vector3(0f, 0.25f, 0f), new Vector3(0.50f, 0.50f, 0.50f), skinColor);
+
+            // Yeux : deux petits cubes noirs sur la face avant (+Z local de HeadPivot)
+            MakeBlock("EyeL", headGO.transform,
+                new Vector3(-0.10f, 0.30f, 0.251f), new Vector3(0.10f, 0.08f, 0.01f), eyeColor);
+            MakeBlock("EyeR", headGO.transform,
+                new Vector3( 0.10f, 0.30f, 0.251f), new Vector3(0.10f, 0.08f, 0.01f), eyeColor);
+
+            // ── Nametag world-space ────────────────────────────────
             BuildNameTag();
+        }
+
+        private static GameObject MakeBlock(string name, Transform parent, Vector3 localPos, Vector3 localScale, Color color)
+        {
+            var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            go.name = name;
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.transform.localScale    = localScale;
+            Object.Destroy(go.GetComponent<Collider>());
+            ApplyColor(go, color);
+            return go;
         }
 
         private void BuildNameTag()
         {
             var tagGO = new GameObject("NameTag");
             tagGO.transform.SetParent(_remoteCapsule.transform, false);
-            tagGO.transform.localPosition = Vector3.up * 2.35f;
+            tagGO.transform.localPosition = new Vector3(0f, 2.25f, 0f);
 
             var canvas = tagGO.AddComponent<Canvas>();
             canvas.renderMode   = RenderMode.WorldSpace;
@@ -281,7 +478,7 @@ namespace AstroVoxel.Network
             bgRT.offsetMax = new Vector2( 4f,  2f);
         }
 
-        // ── Orientation du nametag ────────────────────────────
+        // ── Orientation du nametag vers la caméra ─────────────
 
         private void FaceNameTagToCamera()
         {
