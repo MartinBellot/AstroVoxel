@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using Unity.Collections;
@@ -80,12 +81,22 @@ namespace AstroVoxel.Network
         private float      _lastShipPosReceived = -100f;
         private const float ShipSyncInterval    = 0.05f; // 20 Hz
 
-        // Cible d'interpolation (mis à jour dans les handlers, consommé dans Update)
-        private Vector3    _targetShipPos;
-        private Quaternion _targetShipRot       = Quaternion.identity;
-        private bool       _hasRemoteShipTarget;
+        // Cible d'interpolation PAR vaisseau (shipId → pos/rot)
+        // Mis à jour dans les handlers, consommé dans Update.
+        private readonly Dictionary<int, Vector3>    _targetShipPos = new Dictionary<int, Vector3>();
+        private readonly Dictionary<int, Quaternion> _targetShipRot = new Dictionary<int, Quaternion>();
+        // Horodatage de la dernière position reçue PAR vaisseau (détection pilotage distant)
+        private readonly Dictionary<int, float>      _lastShipPosById = new Dictionary<int, float>();
 
-        /// <summary>True quand un autre joueur (distant) pilote le vaisseau.</summary>
+        /// <summary>True quand un autre joueur (distant) pilote CE vaisseau spécifique.</summary>
+        public static bool IsShipPilotedByRemote(int shipId)
+        {
+            if (!IsNetworkActive || Instance == null) return false;
+            return Instance._lastShipPosById.TryGetValue(shipId, out var t)
+                   && (Time.time - t) < 2f;
+        }
+
+        /// <summary>True si N'IMPORTE quel vaisseau est piloté à distance (compat).</summary>
         public static bool IsShipPilotedByRemote =>
             IsNetworkActive && !IsHost && Instance != null
             && (Time.time - Instance._lastShipPosReceived) < 2f;
@@ -127,14 +138,17 @@ namespace AstroVoxel.Network
 
             if (_ship != null) SyncShipIfPiloting();
 
-            // Interpolation fluide du vaisseau quand piloté par un joueur distant
-            // (lerp chaque frame à 60 Hz au lieu de seulement lors de la réception du paquet)
-            if (_hasRemoteShipTarget && _ship != null && !_ship.IsPiloting)
+            // Interpolation fluide de CHAQUE vaisseau piloté à distance
+            foreach (var kv in _targetShipPos)
             {
-                _ship.transform.position = Vector3.Lerp(
-                    _ship.transform.position, _targetShipPos, Time.deltaTime * 25f);
-                _ship.transform.rotation = Quaternion.Slerp(
-                    _ship.transform.rotation, _targetShipRot, Time.deltaTime * 25f);
+                int shipId = kv.Key;
+                var ship = FindShipById(shipId);
+                if (ship == null || ship.IsPiloting) continue;
+                ship.transform.position = Vector3.Lerp(
+                    ship.transform.position, kv.Value, Time.deltaTime * 25f);
+                if (_targetShipRot.TryGetValue(shipId, out var tRot))
+                    ship.transform.rotation = Quaternion.Slerp(
+                        ship.transform.rotation, tRot, Time.deltaTime * 25f);
             }
         }
 
@@ -378,18 +392,18 @@ namespace AstroVoxel.Network
             // 3. Done
             SendWorldDone(clientId);
 
-            // 4. Position initiale du vaisseau (si présent)
-            //    Le client n'a pas encore reçu de av.ship_pos (pilotage inactif)
-            //    → on lui envoie la position actuelle pour qu'il le positionne correctement.
-            if (_ship != null)
+            // 4. Position initiale de TOUS les vaisseaux présents
+            foreach (var ship in SpaceShipController.AllShips)
             {
-                using var w = new FastBufferWriter(40, Allocator.Temp);
-                w.WriteValueSafe(_ship.transform.position);
-                w.WriteValueSafe(_ship.transform.rotation);
-                w.WriteValueSafe(0f);      // speed = 0 (non piloté au moment de la connexion)
-                w.WriteValueSafe((byte)0); // flags = 0
+                if (ship == null || !ship.gameObject.activeInHierarchy) continue;
+                using var w2 = new FastBufferWriter(44, Allocator.Temp);
+                w2.WriteValueSafe(ship.ShipId);
+                w2.WriteValueSafe(ship.transform.position);
+                w2.WriteValueSafe(ship.transform.rotation);
+                w2.WriteValueSafe(0f);       // speed = 0
+                w2.WriteValueSafe((byte)0);  // flags = 0
                 nm.CustomMessagingManager.SendNamedMessage(
-                    MsgShipPos, clientId, w, NetworkDelivery.ReliableSequenced);
+                    MsgShipPos, clientId, w2, NetworkDelivery.ReliableSequenced);
             }
         }
 
@@ -405,18 +419,22 @@ namespace AstroVoxel.Network
 
         private void SyncShipIfPiloting()
         {
-            if (!_ship.IsPiloting) return;
+            // Synchronise le vaisseau que le joueur LOCAL pilote (peut être différent de _ship).
+            var piloted = SpaceShipController.ActiveShip;
+            if (piloted == null || !piloted.IsPiloting) return;
             _shipSyncTimer += Time.deltaTime;
             if (_shipSyncTimer < ShipSyncInterval) return;
             _shipSyncTimer = 0f;
 
-            float speed = _ship.Speed;
-            byte  flags = (byte)((_ship.IsVerticalThrustActive ? 1 : 0)
-                                | (_ship.IsWingTrailActive      ? 2 : 0));
+            float speed = piloted.Speed;
+            byte  flags = (byte)((piloted.IsVerticalThrustActive ? 1 : 0)
+                                | (piloted.IsWingTrailActive      ? 2 : 0));
 
-            using var w = new FastBufferWriter(40, Allocator.Temp);
-            w.WriteValueSafe(_ship.transform.position);
-            w.WriteValueSafe(_ship.transform.rotation);
+            // Format : shipId(4) + pos(12) + rot(16) + speed(4) + flags(1) = 37 octets
+            using var w = new FastBufferWriter(44, Allocator.Temp);
+            w.WriteValueSafe(piloted.ShipId);
+            w.WriteValueSafe(piloted.transform.position);
+            w.WriteValueSafe(piloted.transform.rotation);
             w.WriteValueSafe(speed);
             w.WriteValueSafe(flags);
 
@@ -599,40 +617,58 @@ namespace AstroVoxel.Network
             }
         }
 
+        // Outil commun : trouve un vaisseau par son ShipId
+        private static SpaceShipController FindShipById(int shipId)
+        {
+            var all = SpaceShipController.AllShips;
+            foreach (var s in all)
+                if (s != null && s.ShipId == shipId) return s;
+            return null;
+        }
+
         // Reçu par les CLIENTS depuis le host : stocker la cible (interpolée dans Update)
         private void HandleShipPos(ulong senderId, FastBufferReader reader)
         {
-            if (NetworkManager.Singleton.IsServer || _ship == null) return;
-            if (_ship.IsPiloting) return; // ce client pilote, ignorer
-            _lastShipPosReceived = Time.time;
+            if (NetworkManager.Singleton.IsServer) return;
+            reader.ReadValueSafe(out int shipId);
             reader.ReadValueSafe(out Vector3 pos);
             reader.ReadValueSafe(out Quaternion rot);
             reader.ReadValueSafe(out float speed);
             reader.ReadValueSafe(out byte  flags);
-            _targetShipPos       = pos;
-            _targetShipRot       = rot;
-            _hasRemoteShipTarget = true;
-            _ship.SetRemoteThrusterState(speed, (flags & 1) != 0, (flags & 2) != 0);
+
+            _lastShipPosReceived           = Time.time;
+            _lastShipPosById[shipId]       = Time.time;
+
+            var ship = FindShipById(shipId);
+            if (ship == null || ship.IsPiloting) return; // ce client pilote ce vaisseau
+
+            _targetShipPos[shipId] = pos;
+            _targetShipRot[shipId] = rot;
+            ship.SetRemoteThrusterState(speed, (flags & 1) != 0, (flags & 2) != 0);
         }
 
         // Reçu par le SERVEUR depuis un CLIENT qui pilote : relayer aux autres
         private void HandleShipReqFromClient(ulong senderId, FastBufferReader reader)
         {
             if (!NetworkManager.Singleton.IsServer) return;
+            reader.ReadValueSafe(out int shipId);
             reader.ReadValueSafe(out Vector3 pos);
             reader.ReadValueSafe(out Quaternion rot);
             reader.ReadValueSafe(out float speed);
             reader.ReadValueSafe(out byte  flags);
-            // Stocker la cible → appliquée en Update pour un mouvement fluide
-            if (_ship != null && !_ship.IsPiloting)
+
+            _lastShipPosById[shipId] = Time.time;
+            var ship = FindShipById(shipId);
+            if (ship != null && !ship.IsPiloting)
             {
-                _targetShipPos       = pos;
-                _targetShipRot       = rot;
-                _hasRemoteShipTarget = true;
-                _ship.SetRemoteThrusterState(speed, (flags & 1) != 0, (flags & 2) != 0);
+                _targetShipPos[shipId] = pos;
+                _targetShipRot[shipId] = rot;
+                ship.SetRemoteThrusterState(speed, (flags & 1) != 0, (flags & 2) != 0);
             }
-            // Relay to all other clients (avec vitesse + flags)
-            using var w = new FastBufferWriter(40, Allocator.Temp);
+
+            // Relay aux autres clients (avec shipId)
+            using var w = new FastBufferWriter(44, Allocator.Temp);
+            w.WriteValueSafe(shipId);
             w.WriteValueSafe(pos);
             w.WriteValueSafe(rot);
             w.WriteValueSafe(speed);

@@ -264,6 +264,7 @@ namespace AstroVoxel.Vehicle
 
         private void Start()
         {
+            if (thrusterParticles == null || thrusterParticles.Length == 0)
                 thrusterParticles = new[] { CreateDefaultThrusterPS() };
             else
                 foreach (var ps in thrusterParticles)
@@ -323,7 +324,7 @@ namespace AstroVoxel.Vehicle
                 if (_player != null
                     && Vector3.Distance(transform.position, _player.position) <= boardingRadius
                     && GetKeyDown_Board()
-                    && !AstroVoxel.Network.ServerManager.IsShipPilotedByRemote)
+                    && !AstroVoxel.Network.ServerManager.IsShipPilotedByRemote(ShipId))
                 {
                     Board();
                 }

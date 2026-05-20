@@ -316,11 +316,11 @@ namespace AstroVoxel.Vehicle
         /// </summary>
         private static IVoxelWorld FindWorldAt(Vector3 worldPos)
         {
-            var planets = FindObjectsByType<PlanetWorld>(FindObjectsSortMode.None);
+            var planets = FindObjectsByType<PlanetWorld>(FindObjectsInactive.Exclude);
             foreach (var p in planets)
                 if (p.GetChunkAt(worldPos) != null) return p;
 
-            var asteroids = FindObjectsByType<AstroVoxel.Space.AsteroidWorld>(FindObjectsSortMode.None);
+            var asteroids = FindObjectsByType<AstroVoxel.Space.AsteroidWorld>(FindObjectsInactive.Exclude);
             foreach (var a in asteroids)
                 if (a.GetChunkAt(worldPos) != null) return a;
 

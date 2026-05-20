@@ -382,21 +382,38 @@ namespace AstroVoxel.Bootstrap
 
         // ── Construction du vaisseau spatial ─────────────────
 
-        private static SpaceShipController BuildSpaceShip(Transform playerBody, Camera playerCam, PlanetWorld world)
+        private static SpaceShipController BuildSpaceShip(
+            Transform playerBody, Camera playerCam, PlanetWorld world,
+            Vector3? spawnPosition = null, Quaternion? spawnRotation = null)
         {
             var shipGO = new GameObject("SpaceShip");
 
             // Spawn juste au-dessus de la surface, légèrement décalé du joueur
             float surfaceDist = PlanetChunkGenerator.PlanetCoreRadius + 4f;
             Vector3 spawnDir  = (Vector3.up * 0.98f + Vector3.right * 0.2f).normalized;
-            shipGO.transform.position = spawnDir * surfaceDist;
 
-            // Orienter le vaisseau tangent à la surface (nez pointe vers +forward planétaire)
-            Vector3 planetUp   = spawnDir;
-            Vector3 shipForward = Vector3.Cross(planetUp, Vector3.forward).normalized;
-            if (shipForward.sqrMagnitude < 0.01f)
-                shipForward = Vector3.Cross(planetUp, Vector3.right).normalized;
-            shipGO.transform.rotation = Quaternion.LookRotation(shipForward, planetUp);
+            if (spawnPosition.HasValue)
+            {
+                shipGO.transform.position = spawnPosition.Value;
+            }
+            else
+            {
+                shipGO.transform.position = spawnDir * surfaceDist;
+            }
+
+            if (spawnRotation.HasValue)
+            {
+                shipGO.transform.rotation = spawnRotation.Value;
+            }
+            else
+            {
+                // Orienter le vaisseau tangent à la surface (nez pointe vers +forward planétaire)
+                Vector3 planetUp    = spawnDir;
+                Vector3 shipForward = Vector3.Cross(planetUp, Vector3.forward).normalized;
+                if (shipForward.sqrMagnitude < 0.01f)
+                    shipForward = Vector3.Cross(planetUp, Vector3.right).normalized;
+                shipGO.transform.rotation = Quaternion.LookRotation(shipForward, planetUp);
+            }
 
             // Rigidbody
             var rb                    = shipGO.AddComponent<Rigidbody>();
@@ -477,9 +494,9 @@ namespace AstroVoxel.Bootstrap
             {
                 // Pour les planètes infinies (différente de defaultWorld), on passe la bonne PlanetWorld.
                 var shipWorld = targetWorld is PlanetWorld pw ? pw : defaultWorld;
-                var newShip = BuildSpaceShip(playerBody, playerCam, shipWorld);
-                newShip.transform.position = pos;
-                newShip.transform.rotation = rot;
+                // On passe directement pos/rot pour éviter tout décalage physique.
+                var newShip = BuildSpaceShip(playerBody, playerCam, shipWorld,
+                                             spawnPosition: pos, spawnRotation: rot);
                 var rb = newShip.GetComponent<Rigidbody>();
                 if (rb != null) { rb.linearVelocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
                 return newShip;
