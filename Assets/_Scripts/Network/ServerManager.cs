@@ -475,21 +475,24 @@ namespace AstroVoxel.Network
             reader.ReadValueSafe(out ulong clientId);
             reader.ReadValueSafe(out Vector3 pos);
             reader.ReadValueSafe(out Quaternion rot);
+            reader.ReadValueSafe(out byte inShipByte);
+            bool inShip = inShipByte != 0;
 
             var nm = NetworkManager.Singleton;
             if (nm == null) return;
 
             // Appliquer localement : mettre à jour le mannequin du joueur
-            PlayerNetworkSync.GetById(clientId)?.SetRemotePosition(pos, rot);
+            PlayerNetworkSync.GetById(clientId)?.SetRemotePosition(pos, rot, inShip);
 
             // Si on est le serveur et que c'est un client qui a envoyé,
             // relayer à tous les AUTRES clients connectés
             if (nm.IsServer && senderId != nm.LocalClientId)
             {
-                using var w = new FastBufferWriter(40, Allocator.Temp);
+                using var w = new FastBufferWriter(41, Allocator.Temp);
                 w.WriteValueSafe(clientId);
                 w.WriteValueSafe(pos);
                 w.WriteValueSafe(rot);
+                w.WriteValueSafe(inShipByte);
                 foreach (var cid in nm.ConnectedClientsIds)
                 {
                     if (cid == senderId || cid == nm.LocalClientId) continue;

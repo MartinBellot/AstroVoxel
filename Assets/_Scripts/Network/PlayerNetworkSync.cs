@@ -37,6 +37,9 @@ namespace AstroVoxel.Network
         private float      _syncTimer;
         private const float SyncInterval = 0.1f; // 10 Hz
 
+        // ── État embarqué ─────────────────────────────────────
+        private bool _inShip;
+
         // ── Références ────────────────────────────────────────
         private Transform  _localPlayerTransform;
         private GameObject _remoteCapsule;
@@ -100,12 +103,20 @@ namespace AstroVoxel.Network
 
         // ── API publique : appelée par ServerManager ──────────
 
-        public void SetRemotePosition(Vector3 pos, Quaternion rot)
+        public void SetRemotePosition(Vector3 pos, Quaternion rot, bool inShip)
         {
             if (_isLocal) return;
             _remoteTargetPos   = pos;
             _remoteTargetRot   = rot;
             _hasRemotePosition = true;
+
+            // Cacher / montrer la capsule selon l'état embarqué
+            if (_remoteCapsule != null)
+            {
+                bool shouldShow = !inShip;
+                if (_remoteCapsule.activeSelf != shouldShow)
+                    _remoteCapsule.SetActive(shouldShow);
+            }
         }
 
         // ── Envoi de position (CustomMessaging) ───────────────
@@ -115,10 +126,11 @@ namespace AstroVoxel.Network
             var nm = NetworkManager.Singleton;
             if (nm == null) return;
 
-            using var w = new FastBufferWriter(40, Allocator.Temp);
+            using var w = new FastBufferWriter(41, Allocator.Temp);
             w.WriteValueSafe(_clientId);
             w.WriteValueSafe(_localPlayerTransform.position);
             w.WriteValueSafe(_localPlayerTransform.rotation);
+            w.WriteValueSafe((byte)(_inShip ? 1 : 0));
 
             if (nm.IsServer)
             {
@@ -152,6 +164,18 @@ namespace AstroVoxel.Network
                     if (pc != null) _localPlayerTransform = pc.transform;
                     return;
                 }
+
+                // Détecter montée / descente du vaisseau via l'état actif du GO joueur
+                bool nowInShip = !_localPlayerTransform.gameObject.activeSelf;
+                if (nowInShip != _inShip)
+                {
+                    _inShip    = nowInShip;
+                    _syncTimer = SyncInterval; // forcer envoi immédiat
+                }
+
+                // En vaisseau : inutile d'envoyer des mises à jour de position
+                if (_inShip) return;
+
                 // Envoi de position à 10 Hz via CustomMessaging
                 _syncTimer += Time.deltaTime;
                 if (_syncTimer < SyncInterval) return;
