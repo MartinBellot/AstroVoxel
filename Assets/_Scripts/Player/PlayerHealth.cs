@@ -9,6 +9,7 @@
 
 using System;
 using UnityEngine;
+using AstroVoxel.VoxelEngine;
 
 namespace AstroVoxel.Player
 {
@@ -81,6 +82,24 @@ namespace AstroVoxel.Player
             if (CurrentHealth <= 0) Die();
         }
 
+        /// <summary>
+        /// Tue instantanément le joueur avec un message personnalisé sur l'écran de mort.
+        /// </summary>
+        public void KillWithMessage(string deathMessage)
+        {
+            if (!GameModeManager.IsSurvival) return;
+            if (_dying) return;
+            _dying = true;
+            CurrentHealth = 0;
+            OnHealthChanged?.Invoke(CurrentHealth, MaxHealth);
+            OnDeath?.Invoke();
+            DeathScreen.Show(() =>
+            {
+                _dying = false;
+                Respawn();
+            }, deathMessage);
+        }
+
         public void Heal(int amount)
         {
             if (amount <= 0) return;
@@ -145,18 +164,40 @@ namespace AstroVoxel.Player
 
         // ── Mort ──────────────────────────────────────────────
 
+        private bool _dying;
+
         private void Die()
         {
+            if (_dying) return;
+            _dying = true;
             OnDeath?.Invoke();
-            // Reset automatique après 0.5 s (respawn simple)
-            Invoke(nameof(Respawn), 0.5f);
+            DeathScreen.Show(() =>
+            {
+                _dying = false;
+                Respawn();
+            });
         }
 
         private void Respawn()
         {
-            ResetHealth();
-            // Vide l'inventaire survie (perte à la mort)
+            // ── Vide l'inventaire (perte totale à la mort) ────
             SurvivalInventoryData.Instance?.Reset();
+
+            // ── Téléporte sur la planète de base ─────────────
+            // Position identique au spawn initial défini dans GameBootstrap.
+            const float SpawnAltitude = 10f;
+            float   spawnDist = PlanetChunkGenerator.PlanetCoreRadius + 2f + SpawnAltitude;
+            Vector3 spawnDir  = Vector3.right;
+
+            transform.position = spawnDir * spawnDist;
+            transform.up       = spawnDir;
+
+            // Annuler toute vélocité résiduelle
+            _rb.linearVelocity  = Vector3.zero;
+            _rb.angularVelocity = Vector3.zero;
+
+            // ── Remet les HP à fond ───────────────────────────
+            ResetHealth();
         }
     }
 }

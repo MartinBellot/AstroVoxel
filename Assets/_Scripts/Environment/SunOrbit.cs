@@ -14,6 +14,8 @@
 
 using UnityEngine;
 using UnityEngine.Rendering;
+using AstroVoxel.Player;
+using AstroVoxel.Vehicle;
 
 namespace AstroVoxel.Environment
 {
@@ -91,6 +93,12 @@ namespace AstroVoxel.Environment
         /// <summary>Direction normalisée du centre planétaire vers le soleil.</summary>
         public Vector3 SunDirection => _sunOrbitDir;
 
+        /// <summary>
+        /// Position réelle du soleil dans le monde (avant repositionnement visuel LateUpdate).
+        /// Utilisée pour la détection de proximité / mort.
+        /// </summary>
+        public Vector3 SunRealWorldPosition => transform.position + _sunOrbitDir * orbitRadius;
+
         // ── API publique ──────────────────────────────────────
 
         /// <summary>Injecte le Transform du joueur (appelé depuis GameBootstrap).</summary>
@@ -117,6 +125,59 @@ namespace AstroVoxel.Environment
         {
             _angle = (_angle + orbitSpeed * Time.deltaTime) % 360f;
             ApplyOrbit(_angle);
+            CheckSunProximityDeath();
+        }
+
+        // ── Mort par proximité solaire ───────────────────────
+
+        // Rayon de la zone de danger (légèrement plus grand que sunRadius)
+        private const float SunDeathRadius = 80f;
+        private bool _sunKillPending;
+
+        private static readonly string[] SunDeathMessages = new[]
+        {
+            "Vous avez cherché le soleil. Vous l'avez trouvé.",
+            "SPF 1 000 000 aurait peut-être suffi.",
+            "Température de surface : 5 500 °C. Vous : bien cuit.",
+            "Le soleil : 1  —  Vous : fondu.",
+            "Il paraît que s'approcher du soleil c'est dangereux. Il paraît.",
+            "Votre vaisseau a été upgrade en cendre.",
+            "Trop chaud pour vous ? Vraiment ?",
+        };
+
+        private void CheckSunProximityDeath()
+        {
+            if (!GameModeManager.IsSurvival) return;
+            if (_sunKillPending) return;
+
+            Vector3 sunPos = SunRealWorldPosition;
+
+            // Vérifie d'abord le vaisseau piloté (prioritaire)
+            var ship = SpaceShipController.ActiveShip;
+            if (ship != null)
+            {
+                float shipDist = Vector3.Distance(ship.transform.position, sunPos);
+                if (shipDist < SunDeathRadius)
+                {
+                    _sunKillPending = true;
+                    string msg = SunDeathMessages[UnityEngine.Random.Range(0, SunDeathMessages.Length)];
+                    ship.TriggerCrashExplosion(msg);
+                    _sunKillPending = false;
+                    return;
+                }
+            }
+
+            // Vérifie ensuite le joueur à pied
+            if (_player == null) return;
+            float playerDist = Vector3.Distance(_player.position, sunPos);
+            if (playerDist < SunDeathRadius)
+            {
+                _sunKillPending = true;
+                var health = _player.GetComponent<PlayerHealth>();
+                string msg = SunDeathMessages[UnityEngine.Random.Range(0, SunDeathMessages.Length)];
+                health?.KillWithMessage(msg);
+                _sunKillPending = false;
+            }
         }
 
         // ── Mouvement orbital ─────────────────────────────────

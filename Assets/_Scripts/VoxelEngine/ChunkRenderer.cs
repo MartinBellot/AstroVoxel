@@ -44,6 +44,14 @@ namespace AstroVoxel.VoxelEngine
         private IVoxelWorld _world;           // référence pour la lookup des voisins réels
         private Quaternion _chunkRotation;    // rotation de ce chunk (local +Y = radial sortant)
         private FaceIndex  _chunkFace;        // face canonique (masque de génération)
+
+        /// <summary>
+        /// Coordonnée de chunk dans la grille planétaire.
+        /// Assignée par <see cref="PlanetWorld.SpawnChunk"/> après création.
+        /// Utilisée pour enregistrer les modifications (BreakBlock/PlaceBlock) dans
+        /// le bon chunk même lorsque la position world est proche d'une frontière de face.
+        /// </summary>
+        public FaceChunkCoord ChunkCoord { get; set; }
         private System.Func<Vector3, byte> _oobBlockProvider;  // fournisseur de blocs hors-chunk
         private bool       _useRadialOrientation = true;       // false pour astéroïdes (chunks cubiques)
         // ── Inspector (mode plat standalone) ─────────────────

@@ -103,6 +103,13 @@ namespace AstroVoxel.Vehicle
         [Tooltip("Caméra 3e personne du vaisseau (inactive par défaut).")]
         [SerializeField] public Camera shipCamera;
 
+        [Header("Survie — Collision")]
+        [Tooltip("Vitesse d'impact minimale (m/s) pour déclencher l'explosion en mode Survie.\n" +
+                 "Valeur par défaut : 100 m/s ≈ 50 % de maxSpeed (200). " +
+                 "Un atterrissage normal (< 50 m/s) reste sans danger ; " +
+                 "seul un impact à pleine vitesse boost provoque l'explosion.")]
+        [SerializeField] private float crashSpeedThreshold = 100f;
+
         [Header("Trainée moteur")]
         [Tooltip("ParticleSystem(s) de tuyères. Laisser vide = création automatique en arrière du vaisseau.")]
         [SerializeField] private ParticleSystem[] thrusterParticles;
@@ -153,6 +160,7 @@ namespace AstroVoxel.Vehicle
         // ── État ──────────────────────────────────────────────
 
         private bool      _piloting;
+        private bool      _exploded;
         private Transform _player;
         private Camera    _playerCamera;
 
@@ -166,6 +174,9 @@ namespace AstroVoxel.Vehicle
 
         /// <summary>Vrai si n'importe quel vaisseau est en cours de pilotage (partagé entre toutes les instances).</summary>
         public static bool IsAnyShipPiloted { get; private set; }
+
+        /// <summary>Le vaisseau actuellement piloté (null si aucun).</summary>
+        public static SpaceShipController ActiveShip { get; private set; }
 
         /// <summary>
         /// Identifiant unique de ce vaisseau dans la session courante (0, 1, 2…).
@@ -482,6 +493,7 @@ namespace AstroVoxel.Vehicle
         {
             _piloting        = true;
             IsAnyShipPiloted = true;
+            ActiveShip       = this;
 
             // Le vaisseau devient le viewer pour le chargement des chunks
             if (_world != null) _world.SetViewer(transform);
@@ -504,6 +516,7 @@ namespace AstroVoxel.Vehicle
         {
             _piloting        = false;
             IsAnyShipPiloted = false;
+            if (ActiveShip == this) ActiveShip = null;
 
             // Rend la main au joueur pour le chargement des chunks
             if (_world != null && _player != null) _world.SetViewer(_player);
@@ -527,6 +540,202 @@ namespace AstroVoxel.Vehicle
             Cursor.visible   = true;
 
             Debug.Log("[SpaceShip] Débarqué !");
+        }
+
+        // ── Collision / Explosion (Survie) ─────────────────
+
+        private void OnCollisionEnter(Collision collision)
+        {
+            if (!AstroVoxel.Player.GameModeManager.IsSurvival) return;
+            if (!_piloting) return;
+            if (_exploded) return;
+
+            // Seuil de vitesse : on vérifie la vitesse relative à l'impact
+            float impactSpeed = collision.relativeVelocity.magnitude;
+            if (impactSpeed < crashSpeedThreshold) return;
+
+            TriggerCrashExplosion();
+        }
+
+        /// <summary>
+        /// Déclenche l'explosion du vaisseau : particules, éjection du joueur, mort.
+        /// Peut être appelé depuis l'extérieur (ex. mort par le soleil).
+        /// </summary>
+        /// <param name="deathMessage">Message affiché sur l'écran de mort (null = message aléatoire).</param>
+        public void TriggerCrashExplosion(string deathMessage = null)
+        {
+            if (_exploded) return;
+            _exploded = true;
+
+            // Débarquer le joueur AVANT de cacher le vaisseau
+            if (_piloting) Disembark();
+
+            // Particules d'explosion à la position du vaisseau
+            SpawnExplosionEffect(transform.position);
+
+            // Stopper le vaisseau
+            _rb.linearVelocity  = Vector3.zero;
+            _rb.angularVelocity = Vector3.zero;
+
+            // Cacher le vaisseau
+            gameObject.SetActive(false);
+
+            // Tuer le joueur (déclenchera DeathScreen via PlayerHealth)
+            if (_player != null)
+            {
+                var health = _player.GetComponent<AstroVoxel.Player.PlayerHealth>();
+                if (health != null)
+                {
+                    if (!string.IsNullOrEmpty(deathMessage))
+                        health.KillWithMessage(deathMessage);
+                    else
+                        health.TakeDamage(AstroVoxel.Player.PlayerHealth.MaxHealth);
+                }
+            }
+        }
+
+        private static void SpawnExplosionEffect(Vector3 position)
+        {
+            // ── Boule de feu centrale ─────────────────────────
+            var fireGO = new GameObject("ShipExplosion_Fire");
+            fireGO.transform.position = position;
+            var firePS = fireGO.AddComponent<ParticleSystem>();
+            ConfigureExplosionFirePS(firePS);
+            firePS.Play();
+            UnityEngine.Object.Destroy(fireGO, 4f);
+
+            // ── Nuage de fumée ────────────────────────────────
+            var smokeGO = new GameObject("ShipExplosion_Smoke");
+            smokeGO.transform.position = position;
+            var smokePS = smokeGO.AddComponent<ParticleSystem>();
+            ConfigureExplosionSmokePS(smokePS);
+            smokePS.Play();
+            UnityEngine.Object.Destroy(smokeGO, 6f);
+        }
+
+        private static void ConfigureExplosionFirePS(ParticleSystem ps)
+        {
+            var main = ps.main;
+            main.loop            = false;
+            main.duration        = 0.4f;
+            main.playOnAwake     = false;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.maxParticles    = 1500;
+            main.startLifetime   = new ParticleSystem.MinMaxCurve(0.5f, 2.2f);
+            main.startSpeed      = new ParticleSystem.MinMaxCurve(8f, 90f);
+            main.startSize       = new ParticleSystem.MinMaxCurve(0.4f, 4.5f);
+            main.startColor      = new ParticleSystem.MinMaxGradient(
+                new Color(1.0f, 0.85f, 0.3f, 1f),
+                new Color(1.0f, 0.20f, 0.0f, 1f)
+            );
+            main.gravityModifier = new ParticleSystem.MinMaxCurve(0.04f);
+
+            var emission = ps.emission;
+            emission.rateOverTime = 0f;
+            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 1500, 1, 0.05f) });
+
+            var shape = ps.shape;
+            shape.enabled   = true;
+            shape.shapeType = ParticleSystemShapeType.Sphere;
+            shape.radius    = 1.8f;
+
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            var grad = new Gradient();
+            grad.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(new Color(1.0f, 0.97f, 0.7f), 0.00f),
+                    new GradientColorKey(new Color(1.0f, 0.45f, 0.05f), 0.20f),
+                    new GradientColorKey(new Color(0.45f, 0.06f, 0.01f), 0.50f),
+                    new GradientColorKey(new Color(0.10f, 0.10f, 0.10f), 1.00f),
+                },
+                new[]
+                {
+                    new GradientAlphaKey(1.0f,  0.00f),
+                    new GradientAlphaKey(0.9f,  0.20f),
+                    new GradientAlphaKey(0.55f, 0.50f),
+                    new GradientAlphaKey(0.0f,  1.00f),
+                }
+            );
+            col.color = new ParticleSystem.MinMaxGradient(grad);
+
+            var sol = ps.sizeOverLifetime;
+            sol.enabled = true;
+            sol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(
+                new Keyframe(0f,    0.2f, 0f, 8f),
+                new Keyframe(0.15f, 1.0f, 8f, 1f),
+                new Keyframe(1f,    3.0f, 1f, 0f)
+            ));
+
+            var noise = ps.noise;
+            noise.enabled     = true;
+            noise.strength    = 1.8f;
+            noise.frequency   = 0.6f;
+            noise.scrollSpeed = 1.2f;
+            noise.damping     = true;
+
+            var rend = ps.GetComponent<ParticleSystemRenderer>();
+            rend.sortingFudge = -10f;
+            rend.material     = CreateThrusterMaterial();
+        }
+
+        private static void ConfigureExplosionSmokePS(ParticleSystem ps)
+        {
+            var main = ps.main;
+            main.loop            = false;
+            main.duration        = 0.6f;
+            main.playOnAwake     = false;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.maxParticles    = 600;
+            main.startLifetime   = new ParticleSystem.MinMaxCurve(2.0f, 5.0f);
+            main.startSpeed      = new ParticleSystem.MinMaxCurve(2f, 18f);
+            main.startSize       = new ParticleSystem.MinMaxCurve(1.5f, 8.0f);
+            main.startColor      = new ParticleSystem.MinMaxGradient(
+                new Color(0.18f, 0.18f, 0.18f, 0.8f),
+                new Color(0.06f, 0.06f, 0.06f, 0.6f)
+            );
+            main.gravityModifier = new ParticleSystem.MinMaxCurve(-0.05f);
+
+            var emission = ps.emission;
+            emission.rateOverTime = 0f;
+            emission.SetBursts(new[] { new ParticleSystem.Burst(0f, 600, 1, 0.1f) });
+
+            var shape = ps.shape;
+            shape.enabled   = true;
+            shape.shapeType = ParticleSystemShapeType.Sphere;
+            shape.radius    = 2.5f;
+
+            var col = ps.colorOverLifetime;
+            col.enabled = true;
+            var grad = new Gradient();
+            grad.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(new Color(0.25f, 0.22f, 0.18f), 0.0f),
+                    new GradientColorKey(new Color(0.12f, 0.12f, 0.12f), 0.4f),
+                    new GradientColorKey(new Color(0.06f, 0.06f, 0.06f), 1.0f),
+                },
+                new[]
+                {
+                    new GradientAlphaKey(0.7f,  0.0f),
+                    new GradientAlphaKey(0.4f,  0.4f),
+                    new GradientAlphaKey(0.0f,  1.0f),
+                }
+            );
+            col.color = new ParticleSystem.MinMaxGradient(grad);
+
+            var sol = ps.sizeOverLifetime;
+            sol.enabled = true;
+            sol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(
+                new Keyframe(0f,   0.3f),
+                new Keyframe(0.3f, 1.0f),
+                new Keyframe(1f,   2.5f)
+            ));
+
+            var rend = ps.GetComponent<ParticleSystemRenderer>();
+            rend.sortingFudge = -9f;
+            rend.material     = CreateThrusterMaterial();
         }
 
         // ── Trainée moteur ────────────────────────────────────

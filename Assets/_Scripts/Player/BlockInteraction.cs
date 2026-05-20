@@ -97,12 +97,14 @@ namespace AstroVoxel.Player
             var ast = hit.collider?.GetComponentInParent<AstroVoxel.Space.AsteroidWorld>();
             if (ast != null) { ast.BreakBlock(pos); return; }
 
-            // Planète infinie (PlanetWorld créé dynamiquement par InfinitePlanetSystem)
+            // Planète infinie ou de base — utilise le ChunkRenderer du collider touché
+            // pour éviter le bug de frontière de face sur les troncs d'arbres.
+            ChunkRenderer hitCr = hit.collider?.GetComponent<ChunkRenderer>();
             var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
-            if (pw != null) { pw.BreakBlock(pos); return; }
+            if (pw != null) { pw.BreakBlock(hitCr, pos); return; }
 
-            // Planète de base
-            world?.BreakBlock(pos);
+            // Planète de base (fallback si la hiérarchie ne remonte pas à PlanetWorld)
+            world?.BreakBlock(hitCr, pos);
         }
 
         private void TryPlaceBlock()
@@ -201,9 +203,12 @@ namespace AstroVoxel.Player
             if (ast != null)      ast.BreakBlock(breakPos);
             else
             {
+                // Utilise le ChunkRenderer du collider touché pour un lookup exact
+                // (évite le bug de frontière de face sur les troncs d'arbres).
+                ChunkRenderer hitCr = hit.collider?.GetComponent<ChunkRenderer>();
                 var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
-                if (pw != null)   pw.BreakBlock(breakPos);
-                else              world?.BreakBlock(breakPos);
+                if (pw != null)   pw.BreakBlock(hitCr, breakPos);
+                else              world?.BreakBlock(hitCr, breakPos);
             }
 
             // Spawner le drop

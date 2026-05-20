@@ -182,6 +182,29 @@ namespace AstroVoxel.VoxelEngine
             return true;
         }
 
+        /// <summary>
+        /// Variante directe pour détruire un bloc en utilisant le <see cref="ChunkRenderer"/>
+        /// du collider touché par le raycast.
+        /// Évite le bug de frontière de face : les troncs d'arbres sont placés dans le chunk
+        /// générateur (via TrySetBlock) qui peut différer du chunk canonique renvoyé par
+        /// <see cref="WorldToFaceChunk"/> (utilisant <see cref="SphereFace.GetFace"/>).
+        /// </summary>
+        public bool BreakBlock(ChunkRenderer cr, Vector3 worldPos)
+        {
+            if (cr == null) return BreakBlock(worldPos);   // fallback sûr
+
+            Vector3 local = cr.transform.InverseTransformPoint(worldPos);
+            int lx = Mathf.Clamp(Mathf.FloorToInt(local.x), 0, VoxelData.ChunkWidth  - 1);
+            int ly = Mathf.Clamp(Mathf.FloorToInt(local.y), 0, VoxelData.ChunkHeight - 1);
+            int lz = Mathf.Clamp(Mathf.FloorToInt(local.z), 0, VoxelData.ChunkWidth  - 1);
+
+            if (!BlockProperties.IsSolid(cr.GetBlock(lx, ly, lz))) return false;
+            cr.SetBlock(lx, ly, lz, BlockType.Air);
+            RecordModification(cr.ChunkCoord, lx, ly, lz, (byte)BlockType.Air);
+            RebuildNeighbourChunks(worldPos);
+            return true;
+        }
+
         public bool PlaceBlock(Vector3 worldPos, BlockType type)
         {
             ChunkRenderer cr = GetChunkAt(worldPos);
@@ -359,6 +382,7 @@ namespace AstroVoxel.VoxelEngine
             var cr = go.AddComponent<ChunkRenderer>();
             cr.InitFromWorld(origin, PlanetCenter, this, rot, coord.Face, blockMaterials,
                              null, null, true, generationConfig);
+            cr.ChunkCoord = coord;
 
             _chunks[coord] = cr;
         }
