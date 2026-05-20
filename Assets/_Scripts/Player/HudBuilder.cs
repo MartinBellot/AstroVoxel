@@ -47,8 +47,10 @@ namespace AstroVoxel.Player
         private Text[]     _slotCount;      // compteur survie (haut-droite de chaque slot)
         private int        _visibleIndex = -1;
         private Material[]      _materials;
+        private Material[]      _itemMaterials;
         private BlockType[]     _hotbarCache      = new BlockType[9];
         private int[]           _hotbarCountCache = new int[9];
+        private ItemType[]      _hotbarItemTypeCache = new ItemType[9];
         private RectTransform[] _hotbarSlotRTs;
 
         private Text   _blockLabel;
@@ -78,6 +80,9 @@ namespace AstroVoxel.Player
 
         /// <summary>RectTransforms des slots hotbar pour la détection de drop drag&amp;drop.</summary>
         public RectTransform[] HotbarSlotRects => _hotbarSlotRTs;
+
+        /// <summary>Fournit les matériaux des items (outils) pour l'affichage dans la hotbar.</summary>
+        public void SetItemMaterials(Material[] mats) => _itemMaterials = mats;
 
         public void Init(
             Canvas canvas,
@@ -168,37 +173,54 @@ namespace AstroVoxel.Player
         {
             if (_blockInteract == null || _slotBg == null) return;
 
-            // Hotbar à afficher : créatif ou survie
-            BlockType[] displayHotbar;
             if (GameModeManager.IsSurvival)
             {
                 var survHotbar = SurvivalInventoryData.Instance.Hotbar;
-                displayHotbar = new BlockType[9];
-                for (int i = 0; i < 9; i++)
-                    displayHotbar[i] = !survHotbar[i].IsEmpty && survHotbar[i].IsBlock()
-                        ? survHotbar[i].ToBlockType()
-                        : BlockType.Air;
+
+                // Survie : détecte les changements par ItemType (blocs ET outils)
+                for (int i = 0; i < 9 && i < _slotIcon.Length; i++)
+                {
+                    ItemType curType = survHotbar[i].IsEmpty ? ItemType.None : survHotbar[i].itemType;
+                    if (curType == _hotbarItemTypeCache[i]) continue;
+                    _hotbarItemTypeCache[i] = curType;
+
+                    if (!survHotbar[i].IsEmpty && survHotbar[i].IsTool())
+                    {
+                        ApplyItemIcon(_slotIcon[i], survHotbar[i].itemType);
+                        _hotbarCache[i] = BlockType.Air;
+                    }
+                    else
+                    {
+                        BlockType bt = survHotbar[i].IsEmpty ? BlockType.Air : survHotbar[i].ToBlockType();
+                        _hotbarCache[i] = bt;
+                        ApplyBlockColor(_slotIcon[i], bt, _materials);
+                    }
+
+                    if (_slotIconTint != null && i < _slotIconTint.Length)
+                        _slotIconTint[i] = _slotIcon[i].color;
+                    bool sel = (i == _visibleIndex);
+                    var tint = _slotIconTint != null && i < _slotIconTint.Length
+                        ? _slotIconTint[i] : Color.white;
+                    _slotIcon[i].color = new Color(tint.r, tint.g, tint.b, sel ? 1f : 0.55f);
+                }
             }
             else
             {
-                displayHotbar = _blockInteract.Hotbar;
-            }
-
-            // Detecte les changements de contenu de hotbar
-            var hotbar = displayHotbar;
-            for (int i = 0; i < hotbar.Length && i < _slotIcon.Length; i++)
-            {
-                if (hotbar[i] != _hotbarCache[i])
+                // Créatif : utilise BlockType[] directement
+                var hotbar = _blockInteract.Hotbar;
+                for (int i = 0; i < hotbar.Length && i < _slotIcon.Length; i++)
                 {
-                    _hotbarCache[i] = hotbar[i];
-                    ApplyBlockColor(_slotIcon[i], hotbar[i], _materials);
-                    if (_slotIconTint != null && i < _slotIconTint.Length)
-                        _slotIconTint[i] = _slotIcon[i].color;
-                    // Réapplique immédiatement l'alpha sélection/non-sélection sur la nouvelle teinte
-                    bool selected = (i == _visibleIndex);
-                    var t = _slotIconTint != null && i < _slotIconTint.Length
-                        ? _slotIconTint[i] : Color.white;
-                    _slotIcon[i].color = new Color(t.r, t.g, t.b, selected ? 1f : 0.55f);
+                    if (hotbar[i] != _hotbarCache[i])
+                    {
+                        _hotbarCache[i] = hotbar[i];
+                        ApplyBlockColor(_slotIcon[i], hotbar[i], _materials);
+                        if (_slotIconTint != null && i < _slotIconTint.Length)
+                            _slotIconTint[i] = _slotIcon[i].color;
+                        bool selected = (i == _visibleIndex);
+                        var t = _slotIconTint != null && i < _slotIconTint.Length
+                            ? _slotIconTint[i] : Color.white;
+                        _slotIcon[i].color = new Color(t.r, t.g, t.b, selected ? 1f : 0.55f);
+                    }
                 }
             }
 
@@ -228,8 +250,22 @@ namespace AstroVoxel.Player
             _visibleIndex = idx;
             AnimateSlot(_visibleIndex, true);
 
-            // Label du bloc sélectionné
-            ShowBlockLabel(BlockFaceData.GetDisplayName((byte)_blockInteract.ActiveBlock));
+            // Label du bloc/item sélectionné
+            if (GameModeManager.IsSurvival)
+            {
+                var survHotbar = SurvivalInventoryData.Instance.Hotbar;
+                ItemStack activeStack = (idx >= 0 && idx < survHotbar.Length) ? survHotbar[idx] : ItemStack.Empty;
+                string labelName = activeStack.IsEmpty
+                    ? ""
+                    : activeStack.IsTool()
+                        ? ItemTypeHelper.GetDisplayName(activeStack.itemType)
+                        : BlockFaceData.GetDisplayName((byte)(int)activeStack.itemType);
+                ShowBlockLabel(labelName);
+            }
+            else
+            {
+                ShowBlockLabel(BlockFaceData.GetDisplayName((byte)_blockInteract.ActiveBlock));
+            }
         }
 
         private void AnimateSlot(int i, bool selected)
@@ -771,6 +807,44 @@ namespace AstroVoxel.Player
             if (font == null) font = Font.CreateDynamicFontFromOSFont("Helvetica Neue", size);
             if (font == null) font = Font.CreateDynamicFontFromOSFont("Arial", size);
             return font;
+        }
+
+        private void ApplyItemIcon(RawImage icon, ItemType itemType)
+        {
+            int idx = (int)itemType - 300;
+            if (_itemMaterials != null && idx >= 0 && idx < _itemMaterials.Length && _itemMaterials[idx] != null)
+            {
+                var mat = _itemMaterials[idx];
+                if (mat.mainTexture is Texture2D tex)
+                {
+                    icon.texture = tex;
+                    icon.color   = Color.white;
+                    return;
+                }
+            }
+            // Fallback : couleur unie selon le type d'outil
+            Color col = GetToolColor(itemType);
+            var solidTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            solidTex.SetPixel(0, 0, col);
+            solidTex.Apply();
+            icon.texture = solidTex;
+            icon.color   = Color.white;
+        }
+
+        private static Color GetToolColor(ItemType t)
+        {
+            switch (t)
+            {
+                case ItemType.Stick:         return new Color(0.70f, 0.55f, 0.30f);
+                case ItemType.WoodenPickaxe: return new Color(0.65f, 0.50f, 0.28f);
+                case ItemType.WoodenAxe:     return new Color(0.65f, 0.50f, 0.28f);
+                case ItemType.WoodenShovel:  return new Color(0.65f, 0.50f, 0.28f);
+                case ItemType.StonePickaxe:  return new Color(0.60f, 0.60f, 0.60f);
+                case ItemType.StoneAxe:      return new Color(0.60f, 0.60f, 0.60f);
+                case ItemType.StoneShovel:   return new Color(0.60f, 0.60f, 0.60f);
+                case ItemType.IronPickaxe:   return new Color(0.85f, 0.85f, 0.90f);
+                default:                     return Color.gray;
+            }
         }
     }
 }

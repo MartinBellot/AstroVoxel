@@ -71,6 +71,7 @@ namespace AstroVoxel.Player
         private RectTransform[] _hotbarSlotRects;
         private DragSlot        _activeDrag;
         private GameObject      _dragVisual;
+        private bool            _dropHandled;
         // ── Init ──────────────────────────────────────────────
 
         public void Init(
@@ -315,6 +316,13 @@ namespace AstroVoxel.Player
                                     || _craftingTableMode;
 
             var allRecipes = CraftingSystem.GetAllCraftableRecipes(hasCraftingTable);
+            // Recettes disponibles en premier
+            allRecipes.Sort((a, b) =>
+            {
+                bool ca = a.CanCraft(SurvivalInventoryData.Instance);
+                bool cb = b.CanCraft(SurvivalInventoryData.Instance);
+                return cb.CompareTo(ca);
+            });
 
             foreach (var recipe in allRecipes)
             {
@@ -698,10 +706,28 @@ namespace AstroVoxel.Player
             ((RectTransform)_dragVisual.transform).anchoredPosition = lp;
         }
 
-        internal void EndDrag(DragSlot source)
+        internal void EndDrag(DragSlot source, PointerEventData e)
         {
             if (_dragVisual != null) { Destroy(_dragVisual); _dragVisual = null; }
-            _activeDrag = null;
+
+            // Fallback : l'overlay plein-écran bloque les OnDrop vers la hotbar.
+            // On détecte manuellement si le curseur est au-dessus d'un slot hotbar.
+            if (!_dropHandled && _activeDrag != null && _hotbarSlotRects != null)
+            {
+                for (int i = 0; i < _hotbarSlotRects.Length; i++)
+                {
+                    if (_hotbarSlotRects[i] == null) continue;
+                    if (RectTransformUtility.RectangleContainsScreenPoint(
+                            _hotbarSlotRects[i], e.position, e.pressEventCamera))
+                    {
+                        var ds = _hotbarSlotRects[i].GetComponent<DragSlot>();
+                        if (ds != null) { Drop(ds); break; }
+                    }
+                }
+            }
+
+            _dropHandled = false;
+            _activeDrag  = null;
         }
 
         internal void Drop(DragSlot target)
@@ -734,6 +760,7 @@ namespace AstroVoxel.Player
                 else if (si >= 0 && ti < 0)  inv.MoveItemToHotbarSlot(target.ItemType, si);
                 else if (si < 0  && ti >= 0) inv.MoveItemToHotbarSlot(src.ItemType,    ti);
             }
+            _dropHandled = true;
         }
 
         private static int FindHotbarSlot(ItemType t)
@@ -815,7 +842,7 @@ namespace AstroVoxel.Player
             }
 
             public void OnDrag(PointerEventData e)    => Owner?.MoveDragVisual(e);
-            public void OnEndDrag(PointerEventData e) => Owner?.EndDrag(this);
+            public void OnEndDrag(PointerEventData e) => Owner?.EndDrag(this, e);
             public void OnDrop(PointerEventData e)    => Owner?.Drop(this);
         }
     }

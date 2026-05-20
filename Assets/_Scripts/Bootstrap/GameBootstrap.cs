@@ -310,6 +310,7 @@ namespace AstroVoxel.Bootstrap
             hudBuilderGO.transform.SetParent(canvasGO.transform, false);
             var hud = hudBuilderGO.AddComponent<HudBuilder>();
             hud.Init(canvas, blockInteract, playerBody, builtMaterials);
+            hud.SetItemMaterials(LoadItemMaterials());
 
             // Inventaire créatif (touche E)
             // On passe les RectTransforms des slots hotbar pour le drag&drop ciblé par slot.
