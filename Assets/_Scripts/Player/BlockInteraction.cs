@@ -4,6 +4,7 @@
 //  Utilise un Raycast depuis la caméra vers le monde.
 // ============================================================
 
+using System;
 using UnityEngine;
 using AstroVoxel.VoxelEngine;
 using AstroVoxel.Network;
@@ -21,6 +22,12 @@ namespace AstroVoxel.Player
     /// </summary>
     public sealed class BlockInteraction : MonoBehaviour
     {
+        /// <summary>
+        /// Déclenché après chaque placement de bloc réussi (créatif et survie).
+        /// Payload : position world du bloc + type de bloc.
+        /// </summary>
+        public static event Action<Vector3, BlockType, IVoxelWorld> OnBlockPlaced;
+
         // ── Inspector ─────────────────────────────────────────
         [Header("Portée d'action")]
         [SerializeField] private float reach = 6f;
@@ -134,31 +141,39 @@ namespace AstroVoxel.Player
             Vector3 pos = hit.point + hit.normal * 0.5f;
 
             bool placed = false;
+            IVoxelWorld usedWorld = null;
 
             // Astéroïde
             var ast = hit.collider?.GetComponentInParent<AstroVoxel.Space.AsteroidWorld>();
             if (ast != null)
             {
                 placed = ast.PlaceBlock(pos, blockToPlace);
+                if (placed) usedWorld = ast;
             }
             else
             {
                 // Planète infinie (PlanetWorld créé dynamiquement par InfinitePlanetSystem)
                 var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
                 if (pw != null && pw != world)
+                {
                     placed = pw.PlaceBlock(pos, blockToPlace);
+                    if (placed) usedWorld = pw;
+                }
                 else
                 {
                     var bsm = BlockSyncManager.Instance;
-                    if (bsm != null)       { bsm.RequestPlaceBlock(pos, blockToPlace); placed = true; }
-                    else if (pw != null)   placed = pw.PlaceBlock(pos, blockToPlace);
-                    else if (world != null) placed = world.PlaceBlock(pos, blockToPlace);
+                    if (bsm != null)        { bsm.RequestPlaceBlock(pos, blockToPlace); placed = true; usedWorld = world; }
+                    else if (pw != null)    { placed = pw.PlaceBlock(pos, blockToPlace);  usedWorld = pw; }
+                    else if (world != null) { placed = world.PlaceBlock(pos, blockToPlace); usedWorld = world; }
                 }
             }
 
             // Empêche le joueur de tomber dans le vide quand il pose un bloc sous ses pieds
             if (placed)
+            {
                 ResolveBlockPlacementOverlap(hit);
+                OnBlockPlaced?.Invoke(pos, blockToPlace, usedWorld);
+            }
         }
 
         // ── Survie : minage progressif ────────────────────────
@@ -225,7 +240,7 @@ namespace AstroVoxel.Player
             if (blockType == BlockType.ShortGrass)
             {
                 dropBlock = BlockType.Air;
-                spawnMelonSeeds = Random.Range(0, 2) == 0;
+                spawnMelonSeeds = UnityEngine.Random.Range(0, 2) == 0;
             }
 
             // Minerais → pas de drop sans la bonne pioche
@@ -290,22 +305,30 @@ namespace AstroVoxel.Player
             BlockType typeToPlace = stack.ToBlockType();
             if (typeToPlace == BlockType.Air) return;
 
-            Vector3 placePos = hit.point + hit.normal * 0.5f;
-            bool placed      = false;
+            Vector3 placePos  = hit.point + hit.normal * 0.5f;
+            bool placed        = false;
+            IVoxelWorld usedWorld2 = null;
 
             var ast2 = hit.collider?.GetComponentInParent<AstroVoxel.Space.AsteroidWorld>();
-            if (ast2 != null) placed = ast2.PlaceBlock(placePos, typeToPlace);
+            if (ast2 != null)
+            {
+                placed = ast2.PlaceBlock(placePos, typeToPlace);
+                if (placed) usedWorld2 = ast2;
+            }
             else
             {
                 var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
                 if (pw != null && pw != world)
+                {
                     placed = pw.PlaceBlock(placePos, typeToPlace);
+                    if (placed) usedWorld2 = pw;
+                }
                 else
                 {
                     var bsm = BlockSyncManager.Instance;
-                    if (bsm != null)        { bsm.RequestPlaceBlock(placePos, typeToPlace); placed = true; }
-                    else if (pw != null)    placed = pw.PlaceBlock(placePos, typeToPlace);
-                    else if (world != null) placed = world.PlaceBlock(placePos, typeToPlace);
+                    if (bsm != null)        { bsm.RequestPlaceBlock(placePos, typeToPlace); placed = true; usedWorld2 = world; }
+                    else if (pw != null)    { placed = pw.PlaceBlock(placePos, typeToPlace);  usedWorld2 = pw; }
+                    else if (world != null) { placed = world.PlaceBlock(placePos, typeToPlace); usedWorld2 = world; }
                 }
             }
 
@@ -313,6 +336,7 @@ namespace AstroVoxel.Player
             {
                 SurvivalInventoryData.Instance.RemoveItem((ItemType)(int)typeToPlace, 1);
                 ResolveBlockPlacementOverlap(hit);
+                OnBlockPlaced?.Invoke(placePos, typeToPlace, usedWorld2);
             }
         }
 

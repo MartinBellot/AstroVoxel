@@ -23,6 +23,7 @@
 // ============================================================
 
 using UnityEngine;
+using System.Collections.Generic;
 using AstroVoxel.Physics;
 using AstroVoxel.VoxelEngine;
 #if ENABLE_INPUT_SYSTEM
@@ -193,6 +194,9 @@ namespace AstroVoxel.Vehicle
         public int ShipId { get; private set; }
         private static int _nextShipId = 0;
 
+        /// <summary>Liste de tous les vaisseaux actifs dans la scène.</summary>
+        public static readonly List<SpaceShipController> AllShips = new List<SpaceShipController>();
+
         /// <summary>Remet le compteur d'ID à zéro. Appelé par GameBootstrap avant la création des vaisseaux.</summary>
         public static void ResetIdCounter() => _nextShipId = 0;
 
@@ -228,6 +232,7 @@ namespace AstroVoxel.Vehicle
         private void Awake()
         {
             ShipId = _nextShipId++;
+            AllShips.Add(this);
 
             _rb = GetComponent<Rigidbody>();
             _rb.useGravity         = false;
@@ -250,9 +255,15 @@ namespace AstroVoxel.Vehicle
             }
         }
 
+        private void OnDestroy()
+        {
+            AllShips.Remove(this);
+            if (ActiveShip == this)       ActiveShip       = null;
+            if (IsAnyShipPiloted && ActiveShip == null) IsAnyShipPiloted = false;
+        }
+
         private void Start()
         {
-            if (thrusterParticles == null || thrusterParticles.Length == 0)
                 thrusterParticles = new[] { CreateDefaultThrusterPS() };
             else
                 foreach (var ps in thrusterParticles)

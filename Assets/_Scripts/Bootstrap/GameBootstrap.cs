@@ -71,7 +71,10 @@ namespace AstroVoxel.Bootstrap
             BuildAtmosphere(playerBody);
 
             // Vaisseau spatial (spawn au sol, à côté du joueur)
-            BuildSpaceShip(playerBody, playerCam, world);
+            SpaceShipController ship = BuildSpaceShip(playerBody, playerCam, world);
+
+            // Détecteur de recette du vaisseau (pattern 3×6 obsidienne + diamant)
+            BuildStarshipCrafter(playerBody, playerCam, world);
 
             // Système d'astéroïdes et météorites
             BuildAsteroidSystem(playerBody, builtMaterials, sunOrbit);
@@ -379,7 +382,7 @@ namespace AstroVoxel.Bootstrap
 
         // ── Construction du vaisseau spatial ─────────────────
 
-        private static void BuildSpaceShip(Transform playerBody, Camera playerCam, PlanetWorld world)
+        private static SpaceShipController BuildSpaceShip(Transform playerBody, Camera playerCam, PlanetWorld world)
         {
             var shipGO = new GameObject("SpaceShip");
 
@@ -461,6 +464,26 @@ namespace AstroVoxel.Bootstrap
             ctrl.shipCamera = shipCam;
             ctrl.SetPlayerReferences(playerBody, playerCam);
             ctrl.SetPlanetWorld(world);
+            return ctrl;
+        }
+
+        private static void BuildStarshipCrafter(Transform playerBody, Camera playerCam, PlanetWorld defaultWorld)
+        {
+            var go = new GameObject("StarshipCraftingDetector");
+            go.AddComponent<StarshipCraftingDetector>();
+
+            // Délégué de fabrication : crée un nouveau vaisseau au moment du craft.
+            StarshipCraftingDetector.SpawnShip = (pos, rot, targetWorld) =>
+            {
+                // Pour les planètes infinies (différente de defaultWorld), on passe la bonne PlanetWorld.
+                var shipWorld = targetWorld is PlanetWorld pw ? pw : defaultWorld;
+                var newShip = BuildSpaceShip(playerBody, playerCam, shipWorld);
+                newShip.transform.position = pos;
+                newShip.transform.rotation = rot;
+                var rb = newShip.GetComponent<Rigidbody>();
+                if (rb != null) { rb.linearVelocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
+                return newShip;
+            };
         }
 
         private static GameObject AddShipPart(

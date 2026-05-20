@@ -65,6 +65,7 @@ namespace AstroVoxel.Network
         internal const string MsgBlocks    = "av.blocks";
         internal const string MsgShipPos    = "av.ship_pos";
         internal const string MsgShipReq    = "av.ship_req";
+        internal const string MsgShipCraft  = "av.ship_craft";
         internal const string MsgPlayerPos  = "av.player_pos";
         internal const string MsgPlayerJoin = "av.player_join";
         internal const string MsgPlayerLeave = "av.player_leave";
@@ -114,6 +115,16 @@ namespace AstroVoxel.Network
         private void Update()
         {
             if (!IsNetworkActive) return;
+
+            // Si le vaisseau actif a été détruit ou désactivé (crash), basculer sur un autre
+            if (_ship != null && !_ship.gameObject.activeInHierarchy)
+            {
+                var all = SpaceShipController.AllShips;
+                _ship = null;
+                foreach (var s in all)
+                    if (s != null && s.gameObject.activeInHierarchy) { _ship = s; break; }
+            }
+
             if (_ship != null) SyncShipIfPiloting();
 
             // Interpolation fluide du vaisseau quand piloté par un joueur distant
@@ -437,6 +448,9 @@ namespace AstroVoxel.Network
             cmm.RegisterNamedMessageHandler(MsgShipPos,   HandleShipPos);
             cmm.RegisterNamedMessageHandler(MsgShipReq,   HandleShipReqFromClient);
             cmm.RegisterNamedMessageHandler(MsgPlayerPos, HandlePlayerPos);
+
+            // Craft du vaisseau : handler délégué au détecteur
+            AstroVoxel.Vehicle.StarshipCraftingDetector.Instance?.RegisterNetworkHandlers();
 
             // Handlers join/leave/list : côté CLIENT uniquement
             if (!NetworkManager.Singleton.IsServer)
