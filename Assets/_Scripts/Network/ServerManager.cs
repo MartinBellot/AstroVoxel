@@ -289,6 +289,20 @@ namespace AstroVoxel.Network
 
             // 3. Done
             SendWorldDone(clientId);
+
+            // 4. Position initiale du vaisseau (si présent)
+            //    Le client n'a pas encore reçu de av.ship_pos (pilotage inactif)
+            //    → on lui envoie la position actuelle pour qu'il le positionne correctement.
+            if (_ship != null)
+            {
+                using var w = new FastBufferWriter(40, Allocator.Temp);
+                w.WriteValueSafe(_ship.transform.position);
+                w.WriteValueSafe(_ship.transform.rotation);
+                w.WriteValueSafe(0f);      // speed = 0 (non piloté au moment de la connexion)
+                w.WriteValueSafe((byte)0); // flags = 0
+                nm.CustomMessagingManager.SendNamedMessage(
+                    MsgShipPos, clientId, w, NetworkDelivery.ReliableSequenced);
+            }
         }
 
         private static void SendWorldDone(ulong clientId)

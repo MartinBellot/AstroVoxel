@@ -56,13 +56,32 @@ namespace AstroVoxel.Network
             {
                 gameObject.name = $"PlayerNet_{OwnerClientId}";
                 BuildRemoteCapsule();      // appelle aussi BuildNameTag() en interne
-                SnapToNetworkPosition();   // snap immédiat à la position réseau
+
+                // S'abonner au changement de valeur : snap au premier changement
+                _netPos.OnValueChanged += OnRemotePosChanged;
+
+                // Si la valeur est déjà répliquée à la spawn (valeur non-nulle), snap immédiat
+                if (_netPos.Value.sqrMagnitude > 0.01f)
+                    SnapToNetworkPosition();
             }
         }
 
         public override void OnNetworkDespawn()
         {
+            _netPos.OnValueChanged -= OnRemotePosChanged;
             if (_remoteCapsule != null) Destroy(_remoteCapsule);
+        }
+
+        // Callback : déclenché chaque fois que _netPos change (y.c. la 1ère valeur réelle)
+        private void OnRemotePosChanged(Vector3 oldVal, Vector3 newVal)
+        {
+            if (_remoteCapsule == null) return;
+            // Snap sans lerp dès qu'on reçoit la première position non-nulle
+            if (oldVal.sqrMagnitude < 0.01f && newVal.sqrMagnitude > 0.01f)
+            {
+                _remoteCapsule.transform.position = newVal;
+                _remoteCapsule.transform.rotation = _netRot.Value;
+            }
         }
 
         // ── Update ────────────────────────────────────────────
@@ -84,9 +103,9 @@ namespace AstroVoxel.Network
             }
             else if (_remoteCapsule != null)
             {
-                // Téléporte si trop loin (spawn ou grands déplacements)
+                // Téléporte si trop loin (>5 unités : grande distance = snap, petite = lerp)
                 float sqrDist = (_remoteCapsule.transform.position - _netPos.Value).sqrMagnitude;
-                if (sqrDist > 100f)
+                if (sqrDist > 25f)
                 {
                     _remoteCapsule.transform.position = _netPos.Value;
                     _remoteCapsule.transform.rotation = _netRot.Value;
