@@ -103,7 +103,9 @@ namespace AstroVoxel.VoxelEngine
             float crust    = generationConfig.HasValue ? generationConfig.Value.CrustThickness   : PlanetChunkGenerator.CrustThickness;
             float halfDiag = cs * 0.8660254f;   // √3/2 * cs
             float shellMax = coreR + amp + 2f + halfDiag;
-            float shellMin = coreR - crust - halfDiag;
+            // shellMin = 0 : génère des chunks jusqu'au noyau pour éviter la planète creuse.
+            // Les chunks intérieurs sont 100 % pierre solide → meshes vides (zéro face visible).
+            float shellMin = 0f;
 
             // Pas d'échantillonnage = cs/2 pour garantir la couverture complète.
             // +2 au lieu de +1 pour garantir les extrémités des faces axiales.
@@ -175,7 +177,9 @@ namespace AstroVoxel.VoxelEngine
             ChunkRenderer cr = GetChunkAt(worldPos);
             if (cr == null) return false;
             Vector3Int lb = WorldToLocalBlock(worldPos);
-            if (!BlockProperties.IsRenderable(cr.GetBlock(lb.x, lb.y, lb.z))) return false;
+            byte _bid0 = cr.GetBlock(lb.x, lb.y, lb.z);
+            if (!BlockProperties.IsRenderable(_bid0)) return false;
+            if (_bid0 == (byte)BlockType.Bedrock) return false;   // noyau incassable
             cr.SetBlock(lb.x, lb.y, lb.z, BlockType.Air);
             RecordModification(WorldToFaceChunk(worldPos), lb.x, lb.y, lb.z, (byte)BlockType.Air);
             RebuildNeighbourChunks(worldPos);
@@ -198,7 +202,9 @@ namespace AstroVoxel.VoxelEngine
             int ly = Mathf.Clamp(Mathf.FloorToInt(local.y), 0, VoxelData.ChunkHeight - 1);
             int lz = Mathf.Clamp(Mathf.FloorToInt(local.z), 0, VoxelData.ChunkWidth  - 1);
 
-            if (!BlockProperties.IsRenderable(cr.GetBlock(lx, ly, lz))) return false;
+            byte _bid1 = cr.GetBlock(lx, ly, lz);
+            if (!BlockProperties.IsRenderable(_bid1)) return false;
+            if (_bid1 == (byte)BlockType.Bedrock) return false;   // noyau incassable
             cr.SetBlock(lx, ly, lz, BlockType.Air);
             RecordModification(cr.ChunkCoord, lx, ly, lz, (byte)BlockType.Air);
             RebuildNeighbourChunks(worldPos);
@@ -227,7 +233,9 @@ namespace AstroVoxel.VoxelEngine
         public bool ApplyNetworkBreak(FaceChunkCoord coord, int lx, int ly, int lz)
         {
             if (!_chunks.TryGetValue(coord, out ChunkRenderer cr)) return false;
-            if (!BlockProperties.IsRenderable(cr.GetBlock(lx, ly, lz))) return false;
+            byte _bidNet = cr.GetBlock(lx, ly, lz);
+            if (!BlockProperties.IsRenderable(_bidNet)) return false;
+            if (_bidNet == (byte)BlockType.Bedrock) return false;  // noyau incassable (anti-exploit réseau)
             cr.SetBlock(lx, ly, lz, BlockType.Air);
             RecordModification(coord, lx, ly, lz, (byte)BlockType.Air);
             Vector3 worldPos = cr.transform.TransformPoint(lx + 0.5f, ly + 0.5f, lz + 0.5f);

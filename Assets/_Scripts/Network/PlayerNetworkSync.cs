@@ -1,12 +1,11 @@
 // ============================================================
 //  PlayerNetworkSync.cs
-//  NetworkBehaviour servant de "proxy réseau" pour chaque joueur.
-//  Utilisé comme PlayerPrefab de NGO (spawn automatique par client).
+//  Proxy de position pour chaque joueur connecté.
+//  MonoBehaviour simple géré par ServerManager — aucun NGO PlayerPrefab.
 //
-//  - IsOwner = true  : envoie la position locale via ServerRpc → ClientRpc
-//                      (plus fiable que NetworkVariable owner-write en NGO 2.x).
-//  - IsOwner = false : reçoit les positions via ClientRpc et anime un mannequin
-//    capsule + nametag représentant le joueur distant.
+//  - isLocal = true  : joueur local, envoie sa position via CustomMessaging.
+//  - isLocal = false : joueur distant, reçoit les positions et anime un
+//    mannequin capsule + nametag représentant le joueur.
 // ============================================================
 
 using System.Collections.Generic;
@@ -17,21 +16,24 @@ using UnityEngine.UI;
 
 namespace AstroVoxel.Network
 {
-    [RequireComponent(typeof(NetworkObject))]
-    public sealed class PlayerNetworkSync : NetworkBehaviour
+    public sealed class PlayerNetworkSync : MonoBehaviour
     {
-        // ── Registre statique : lookup par OwnerClientId ────
+        // ── Registre statique : lookup par clientId ────────────
         private static readonly Dictionary<ulong, PlayerNetworkSync> _registry = new();
 
         public static PlayerNetworkSync GetById(ulong clientId) =>
             _registry.TryGetValue(clientId, out var s) ? s : null;
 
-        // ── Position distante (non-owner) ────────────────
+        // ── Identité ──────────────────────────────────────────
+        private ulong _clientId;
+        private bool  _isLocal;
+
+        // ── Position distante (non-local) ─────────────────────
         private Vector3    _remoteTargetPos;
         private Quaternion _remoteTargetRot = Quaternion.identity;
         private bool       _hasRemotePosition;
 
-        // ── Timer d'envoi de position (owner) ─────────────────
+        // ── Timer d'envoi de position (local) ─────────────────
         private float      _syncTimer;
         private const float SyncInterval = 0.1f; // 10 Hz
 
@@ -46,13 +48,15 @@ namespace AstroVoxel.Network
         private static readonly Color _bodyColor = new Color(0.30f, 0.55f, 1.00f);
         private static readonly Color _headColor = new Color(0.38f, 0.62f, 1.00f);
 
-        // ── NGO Lifecycle ─────────────────────────────────────
+        // ── Initialisation explicite (appelée par ServerManager) ──
 
-        public override void OnNetworkSpawn()
+        public void Init(ulong clientId, bool isLocal)
         {
-            _registry[OwnerClientId] = this;
+            _clientId = clientId;
+            _isLocal  = isLocal;
+            _registry[clientId] = this;
 
-            if (IsOwner)
+            if (isLocal)
             {
                 var pc = FindAnyObjectByType<AstroVoxel.Player.PlayerController>();
                 if (pc != null) _localPlayerTransform = pc.transform;
@@ -60,28 +64,51 @@ namespace AstroVoxel.Network
             }
             else
             {
-                gameObject.name = $"PlayerNet_{OwnerClientId}";
+                gameObject.name = $"PlayerNet_{clientId}";
                 BuildRemoteCapsule();
             }
         }
 
-        public override void OnNetworkDespawn()
+        /// <summary>Supprime le sync et le mannequin associé.</summary>
+        public void Cleanup()
         {
-            _registry.Remove(OwnerClientId);
+            _registry.Remove(_clientId);
             if (_remoteCapsule != null) Destroy(_remoteCapsule);
+            Destroy(gameObject);
         }
 
-        // ── API publique : appelée par ServerManager ──────
+        /// <summary>Supprime tous les syncs (appelé lors d'une déconnexion).</summary>
+        public static void DestroyAll()
+        {
+            var copy = new System.Collections.Generic.List<PlayerNetworkSync>(_registry.Values);
+            _registry.Clear();
+            foreach (var s in copy)
+            {
+                if (s == null) continue;
+                if (s._remoteCapsule != null) Destroy(s._remoteCapsule);
+                Destroy(s.gameObject);
+            }
+        }
+
+        private void OnDestroy()
+        {
+            // Filet de sécurité : nettoyer le registre si le GO est détruit
+            // (ex. rechargement de scène) sans passer par Cleanup().
+            if (_registry.TryGetValue(_clientId, out var s) && ReferenceEquals(s, this))
+                _registry.Remove(_clientId);
+        }
+
+        // ── API publique : appelée par ServerManager ──────────
 
         public void SetRemotePosition(Vector3 pos, Quaternion rot)
         {
-            if (IsOwner) return;
+            if (_isLocal) return;
             _remoteTargetPos   = pos;
             _remoteTargetRot   = rot;
             _hasRemotePosition = true;
         }
 
-        // ── Envoi de position (CustomMessaging) ──────────────
+        // ── Envoi de position (CustomMessaging) ───────────────
 
         private void SendPositionUpdate()
         {
@@ -89,7 +116,7 @@ namespace AstroVoxel.Network
             if (nm == null) return;
 
             using var w = new FastBufferWriter(40, Allocator.Temp);
-            w.WriteValueSafe(OwnerClientId);
+            w.WriteValueSafe(_clientId);
             w.WriteValueSafe(_localPlayerTransform.position);
             w.WriteValueSafe(_localPlayerTransform.rotation);
 
@@ -117,7 +144,7 @@ namespace AstroVoxel.Network
 
         private void Update()
         {
-            if (IsOwner)
+            if (_isLocal)
             {
                 if (_localPlayerTransform == null)
                 {
@@ -162,7 +189,7 @@ namespace AstroVoxel.Network
 
         private void BuildRemoteCapsule()
         {
-            _remoteCapsule = new GameObject($"RemotePlayer_{OwnerClientId}");
+            _remoteCapsule = new GameObject($"RemotePlayer_{_clientId}");
 
             // ── Corps (capsule) ───────────────────────────────
             var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
@@ -208,7 +235,7 @@ namespace AstroVoxel.Network
             _nameText.fontSize  = 36;
             _nameText.alignment = TextAnchor.MiddleCenter;
             _nameText.color     = Color.white;
-            _nameText.text      = $"Joueur {OwnerClientId}";
+            _nameText.text      = $"Joueur {_clientId}";
 
             var textRT = textGO.GetComponent<RectTransform>();
             textRT.anchorMin = Vector2.zero;

@@ -16,6 +16,13 @@ namespace AstroVoxel.VoxelEngine
         /// <summary>Rayon de la surface de la planète en blocs.</summary>
         public const float PlanetCoreRadius = 50f;
 
+        /// <summary>
+        /// Rayon de la sphère de bedrock incassable au cœur de la planète.
+        /// Tout bloc dont la distance au centre est ≤ à cette valeur est du bedrock
+        /// (≈ 30 % du rayon de surface, soit ~15 blocs pour la home planet).
+        /// </summary>
+        public const float PlanetCoreBedrockRadius = PlanetCoreRadius * 0.30f;
+
         /// <summary>Épaisseur de la croûte solide sous la surface.</summary>
         public const int CrustThickness = 12;
 
@@ -65,7 +72,8 @@ namespace AstroVoxel.VoxelEngine
             float dz = worldPos.z - planetCenter.z;
             float dist = Mathf.Sqrt(dx * dx + dy * dy + dz * dz);
 
-            if (dist < 0.001f) return (byte)BlockType.Stone;
+            // Sphère de bedrock incassable au noyau.
+            if (dist <= PlanetCoreBedrockRadius) return (byte)BlockType.Bedrock;
 
             // Normalisation manuelle — IDENTIQUE à ce que fait Vector3.normalized
             float invDist = 1f / dist;
@@ -195,7 +203,7 @@ namespace AstroVoxel.VoxelEngine
                 data.SetBlock(x, y, z, GetBlockType(blockPos, planetCenter));
             }
 
-            PlaceTrees(data, chunkOriginWorld, planetCenter, chunkRotation);
+            PlaceTrees(data, chunkOriginWorld, planetCenter, chunkRotation, chunkFace);
             PlaceShortGrass(data, chunkOriginWorld, planetCenter, chunkRotation);
         }
 
@@ -213,7 +221,7 @@ namespace AstroVoxel.VoxelEngine
         /// Place des arbres déterministes dans le chunk courant.
         /// On itère sur les cellules de grille voisines pouvant déborder dans ce chunk.
         /// </summary>
-        private static void PlaceTrees(ChunkData data, Vector3 chunkOrigin, Vector3 planetCenter, Quaternion chunkRotation)
+        private static void PlaceTrees(ChunkData data, Vector3 chunkOrigin, Vector3 planetCenter, Quaternion chunkRotation, FaceIndex chunkFace)
         {
             int S = TreeCellSize;
             int expand = MaxTrunkHeight + MaxCanopyRadius + S;
@@ -311,6 +319,9 @@ namespace AstroVoxel.VoxelEngine
                     int wx = Mathf.FloorToInt(canopyCenter.x) + lx;
                     int wy = Mathf.FloorToInt(canopyCenter.y) + ly;
                     int wz = Mathf.FloorToInt(canopyCenter.z) + lz;
+                    // Ownership check : un seul chunk possède chaque bloc de feuillage
+                    // → élimine le z-fighting quand deux chunks couvrent la même position.
+                    if (SphereFace.GetFace(new Vector3(wx + 0.5f, wy + 0.5f, wz + 0.5f) - planetCenter) != chunkFace) continue;
                     TrySetBlock(data, chunkOrigin, wx, wy, wz, (byte)BlockType.Leaves, overwrite: false, chunkRotation);
                 }
             }
@@ -399,7 +410,8 @@ namespace AstroVoxel.VoxelEngine
             float dz   = worldPos.z - planetCenter.z;
             float dist = Mathf.Sqrt(dx * dx + dy * dy + dz * dz);
 
-            if (dist < 0.001f) return GetDeepBlock(cfg.Biome);
+            // Sphère de bedrock incassable au noyau (30 % du rayon de surface).
+            if (dist <= cfg.CoreRadius * 0.30f) return (byte)BlockType.Bedrock;
 
             float invDist = 1f / dist;
             float ndx = dx * invDist;
@@ -477,7 +489,7 @@ namespace AstroVoxel.VoxelEngine
             }
 
             if (cfg.HasTrees)
-                PlaceTreesWithConfig(data, chunkOriginWorld, planetCenter, chunkRotation, in cfg);
+                PlaceTreesWithConfig(data, chunkOriginWorld, planetCenter, chunkRotation, in cfg, chunkFace);
             PlaceShortGrass(data, chunkOriginWorld, planetCenter, chunkRotation);
         }
 
@@ -708,7 +720,7 @@ namespace AstroVoxel.VoxelEngine
 
         private static void PlaceTreesWithConfig(
             ChunkData data, Vector3 chunkOrigin, Vector3 planetCenter,
-            Quaternion chunkRotation, in PlanetGenerationConfig cfg)
+            Quaternion chunkRotation, in PlanetGenerationConfig cfg, FaceIndex chunkFace)
         {
             int S      = TreeCellSize;
             int expand = MaxTrunkHeight + MaxCanopyRadius + S;
@@ -777,7 +789,7 @@ namespace AstroVoxel.VoxelEngine
                         continue;
                     case PlanetBiome.Mossy:
                     case PlanetBiome.Nether:
-                        PlaceGiantMushroom(data, chunkOrigin, chunkRotation, searchBase, up, hash, cfg.Biome);
+                        PlaceGiantMushroom(data, chunkOrigin, chunkRotation, searchBase, up, hash, cfg.Biome, chunkFace, planetCenter);
                         continue;
                     case PlanetBiome.Volcanic:
                         PlaceObsidianPillar(data, chunkOrigin, chunkRotation, searchBase, up, hash);
@@ -838,6 +850,9 @@ namespace AstroVoxel.VoxelEngine
                     int wx = Mathf.FloorToInt(canopyCenter.x) + lx;
                     int wy = Mathf.FloorToInt(canopyCenter.y) + ly;
                     int wz = Mathf.FloorToInt(canopyCenter.z) + lz;
+                    // Ownership check : un seul chunk possède chaque bloc de feuillage
+                    // → élimine le z-fighting quand deux chunks couvrent la même position.
+                    if (SphereFace.GetFace(new Vector3(wx + 0.5f, wy + 0.5f, wz + 0.5f) - planetCenter) != chunkFace) continue;
                     TrySetBlock(data, chunkOrigin, wx, wy, wz, leafType, overwrite: false, chunkRotation);
                 }
             }
@@ -942,7 +957,8 @@ namespace AstroVoxel.VoxelEngine
         /// <summary>Champignon géant : tronc MushroomStem + chapeau plat (disque) rouge ou brun.</summary>
         private static void PlaceGiantMushroom(
             ChunkData data, Vector3 chunkOrigin, Quaternion chunkRotation,
-            Vector3 baseBlock, Vector3 up, int hash, PlanetBiome biome)
+            Vector3 baseBlock, Vector3 up, int hash, PlanetBiome biome,
+            FaceIndex chunkFace, Vector3 planetCenter)
         {
             int trunkH = 4 + (int)((uint)hash >> 4) % 3;   // 4..6
             int capR   = 2 + (int)((uint)hash >> 8) % 2;   // 2..3
@@ -980,6 +996,8 @@ namespace AstroVoxel.VoxelEngine
                 int wx = Mathf.FloorToInt(capCenter.x) + lx;
                 int wy = Mathf.FloorToInt(capCenter.y) + ly;
                 int wz = Mathf.FloorToInt(capCenter.z) + lz;
+                // Ownership check : évite le z-fighting du chapeau entre chunks adjacents.
+                if (SphereFace.GetFace(new Vector3(wx + 0.5f, wy + 0.5f, wz + 0.5f) - planetCenter) != chunkFace) continue;
                 TrySetBlock(data, chunkOrigin, wx, wy, wz, b, overwrite: false, chunkRotation);
             }
         }

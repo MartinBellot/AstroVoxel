@@ -548,18 +548,6 @@ namespace AstroVoxel.Bootstrap
                 nm.NetworkConfig = new NetworkConfig(); // champ non initialisé par défaut (runtime AddComponent)
                 var transport = nmGO.AddComponent<UnityTransport>();
                 nm.NetworkConfig.NetworkTransport = transport;
-
-                // PlayerPrefab : NetworkObject léger (PlayerNetworkSync crée les visuels à l'spawn)
-                var playerNetPrefab = new GameObject("PlayerNetPrefab");
-                playerNetPrefab.SetActive(false); // template inactif
-                var netObj = playerNetPrefab.AddComponent<NetworkObject>();
-                ForceNetworkObjectHash(netObj, "av.player.v1");
-                playerNetPrefab.AddComponent<PlayerNetworkSync>();
-                DontDestroyOnLoad(playerNetPrefab);
-
-                nm.NetworkConfig.PlayerPrefab = playerNetPrefab;
-                // Enregistrer aussi dans la liste Prefabs (requis par NGO 2.x pour la validation du spawn)
-                nm.NetworkConfig.Prefabs.Add(new Unity.Netcode.NetworkPrefab { Prefab = playerNetPrefab });
             }
 
             // ServerManager et BlockSyncManager sont liés à la scène (détruits au rechargement) :
@@ -582,27 +570,6 @@ namespace AstroVoxel.Bootstrap
             var ship = FindAnyObjectByType<SpaceShipController>();
             if (ship != null)
                 ServerManager.Instance?.SetShip(ship);
-        }
-
-        /// <summary>
-        /// Force un hash déterministe sur un NetworkObject créé par code.
-        /// Utilise FNV-1a sur la clé unique → même hash sur host et clients.
-        /// </summary>
-        private static void ForceNetworkObjectHash(NetworkObject netObj, string uniqueKey)
-        {
-            uint hash = FNV1aHash(uniqueKey);
-            var field = typeof(NetworkObject).GetField(
-                "m_GlobalObjectIdHash",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            field?.SetValue(netObj, hash);
-        }
-
-        private static uint FNV1aHash(string s)
-        {
-            uint hash = 2166136261u;
-            foreach (char c in s)
-                hash = (hash ^ (byte)c) * 16777619u;
-            return hash == 0 ? 1u : hash;
         }
 
         // ── Système de sauvegarde ───────────────────────

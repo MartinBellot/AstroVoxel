@@ -63,9 +63,12 @@ namespace AstroVoxel.Network
         internal const string MsgWorldMod  = "av.world_mod";
         internal const string MsgWorldDone = "av.world_done";
         internal const string MsgBlocks    = "av.blocks";
-        internal const string MsgShipPos   = "av.ship_pos";
-        internal const string MsgShipReq   = "av.ship_req";
-        internal const string MsgPlayerPos = "av.player_pos";
+        internal const string MsgShipPos    = "av.ship_pos";
+        internal const string MsgShipReq    = "av.ship_req";
+        internal const string MsgPlayerPos  = "av.player_pos";
+        internal const string MsgPlayerJoin = "av.player_join";
+        internal const string MsgPlayerLeave = "av.player_leave";
+        internal const string MsgPlayerList  = "av.player_list";
 
         // ── Encode/Decode (base36, 10 chars = IPv4 + port) ───
         private const ushort Port  = 7777;
@@ -129,6 +132,21 @@ namespace AstroVoxel.Network
         public void SetWorld(PlanetWorld world) => _world = world;
         public void SetShip(SpaceShipController ship) => _ship = ship;
 
+        // ── Gestion des syncs joueur ──────────────────────────
+
+        private static PlayerNetworkSync CreatePlayerSync(ulong clientId, bool isLocal)
+        {
+            var go   = new GameObject(isLocal ? "PlayerNet_Local" : $"PlayerNet_{clientId}");
+            var sync = go.AddComponent<PlayerNetworkSync>();
+            sync.Init(clientId, isLocal);
+            return sync;
+        }
+
+        private static void RemovePlayerSync(ulong clientId)
+        {
+            PlayerNetworkSync.GetById(clientId)?.Cleanup();
+        }
+
         // ── Host ─────────────────────────────────────────────
 
         public void HostServer()
@@ -155,6 +173,9 @@ namespace AstroVoxel.Network
             }
 
             RegisterHandlers();
+
+            // Créer le sync local du host
+            CreatePlayerSync(nm.LocalClientId, isLocal: true);
 
             _currentCode = EncodeIP(ip, Port);
             OnHostReady?.Invoke(_currentCode);
@@ -197,6 +218,7 @@ namespace AstroVoxel.Network
 
         public void Disconnect()
         {
+            PlayerNetworkSync.DestroyAll();
             var nm = NetworkManager.Singleton;
             if (nm == null || !nm.IsListening) return;
             nm.OnClientConnectedCallback  -= OnClientConnectedAsHost;
@@ -211,7 +233,42 @@ namespace AstroVoxel.Network
         private void OnClientConnectedAsHost(ulong clientId)
         {
             if (clientId == NetworkManager.Singleton.LocalClientId) return;
-            // Nouveau client → lui envoyer l'état du monde
+            var nm = NetworkManager.Singleton;
+
+            // Créer le sync distant pour le nouveau client (côté host)
+            CreatePlayerSync(clientId, isLocal: false);
+
+            // Envoyer la liste des joueurs déjà connectés au nouveau client
+            // (tous sauf lui-même)
+            var existingIds = new System.Collections.Generic.List<ulong>();
+            foreach (var cid in nm.ConnectedClientsIds)
+            {
+                if (cid != clientId)
+                    existingIds.Add(cid);
+            }
+            if (existingIds.Count > 0)
+            {
+                using var listW = new FastBufferWriter(4 + existingIds.Count * 8, Allocator.Temp);
+                listW.WriteValueSafe(existingIds.Count);
+                foreach (var cid in existingIds)
+                    listW.WriteValueSafe(cid);
+                nm.CustomMessagingManager.SendNamedMessage(
+                    MsgPlayerList, clientId, listW, NetworkDelivery.Reliable);
+            }
+
+            // Annoncer le nouveau client aux joueurs distants déjà connectés
+            {
+                using var joinW = new FastBufferWriter(8, Allocator.Temp);
+                joinW.WriteValueSafe(clientId);
+                foreach (var cid in nm.ConnectedClientsIds)
+                {
+                    if (cid == clientId || cid == nm.LocalClientId) continue;
+                    nm.CustomMessagingManager.SendNamedMessage(
+                        MsgPlayerJoin, cid, joinW, NetworkDelivery.Reliable);
+                }
+            }
+
+            // Envoyer l'état du monde au nouveau client
             StartCoroutine(CoSendWorldState(clientId));
         }
 
@@ -220,14 +277,33 @@ namespace AstroVoxel.Network
             // On ne réagit qu'à notre propre connexion
             if (clientId != NetworkManager.Singleton.LocalClientId) return;
             OnStatusMessage?.Invoke("Connecté ! En attente de la seed…");
+            // Créer le sync local du client
+            CreatePlayerSync(clientId, isLocal: true);
         }
 
         private void OnClientDisconnected(ulong clientId)
         {
             var nm = NetworkManager.Singleton;
             if (nm == null) return;
-            if (clientId == nm.LocalClientId)
+
+            if (nm.IsServer)
+            {
+                // Un client s'est déconnecté : supprimer son sync et avertir les autres
+                RemovePlayerSync(clientId);
+                using var w = new FastBufferWriter(8, Allocator.Temp);
+                w.WriteValueSafe(clientId);
+                foreach (var cid in nm.ConnectedClientsIds)
+                {
+                    if (cid == nm.LocalClientId) continue;
+                    nm.CustomMessagingManager.SendNamedMessage(
+                        MsgPlayerLeave, cid, w, NetworkDelivery.Reliable);
+                }
+            }
+            else if (clientId == nm.LocalClientId)
+            {
+                // Déconnexion propre du client
                 OnStatusMessage?.Invoke("Déconnecté du serveur.");
+            }
         }
 
         // ── Envoi état monde → nouveau client ─────────────────
@@ -361,6 +437,36 @@ namespace AstroVoxel.Network
             cmm.RegisterNamedMessageHandler(MsgShipPos,   HandleShipPos);
             cmm.RegisterNamedMessageHandler(MsgShipReq,   HandleShipReqFromClient);
             cmm.RegisterNamedMessageHandler(MsgPlayerPos, HandlePlayerPos);
+
+            // Handlers join/leave/list : côté CLIENT uniquement
+            if (!NetworkManager.Singleton.IsServer)
+            {
+                cmm.RegisterNamedMessageHandler(MsgPlayerList,  HandlePlayerList);
+                cmm.RegisterNamedMessageHandler(MsgPlayerJoin,  HandlePlayerJoin);
+                cmm.RegisterNamedMessageHandler(MsgPlayerLeave, HandlePlayerLeave);
+            }
+        }
+
+        private void HandlePlayerList(ulong senderId, FastBufferReader reader)
+        {
+            reader.ReadValueSafe(out int count);
+            for (int i = 0; i < count; i++)
+            {
+                reader.ReadValueSafe(out ulong clientId);
+                CreatePlayerSync(clientId, isLocal: false);
+            }
+        }
+
+        private void HandlePlayerJoin(ulong senderId, FastBufferReader reader)
+        {
+            reader.ReadValueSafe(out ulong clientId);
+            CreatePlayerSync(clientId, isLocal: false);
+        }
+
+        private void HandlePlayerLeave(ulong senderId, FastBufferReader reader)
+        {
+            reader.ReadValueSafe(out ulong clientId);
+            RemovePlayerSync(clientId);
         }
 
         // Reçu depuis un client (sur le serveur) ou depuis le serveur (sur un client)
