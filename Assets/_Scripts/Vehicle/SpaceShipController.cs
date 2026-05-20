@@ -200,6 +200,17 @@ namespace AstroVoxel.Vehicle
         /// <summary>Remet le compteur d'ID à zéro. Appelé par GameBootstrap avant la création des vaisseaux.</summary>
         public static void ResetIdCounter() => _nextShipId = 0;
 
+        /// <summary>
+        /// Force l'ID de ce vaisseau à <paramref name="id"/> et s'assure que le compteur
+        /// global ne redonnera jamais cet ID à un futur vaisseau.
+        /// Utilisé côté client pour rester en sync avec l'ID assigné par le host.
+        /// </summary>
+        internal void ForceShipId(int id)
+        {
+            ShipId = id;
+            if (_nextShipId <= id) _nextShipId = id + 1;
+        }
+
         /// <summary>Vitesse scalaire en unités/s.</summary>
         public float Speed => _rb != null ? _rb.linearVelocity.magnitude : 0f;
 
