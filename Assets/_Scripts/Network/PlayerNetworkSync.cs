@@ -170,7 +170,9 @@ namespace AstroVoxel.Network
                 if (nowInShip != _inShip)
                 {
                     _inShip    = nowInShip;
-                    _syncTimer = SyncInterval; // forcer envoi immédiat
+                    _syncTimer = 0f;
+                    SendPositionUpdate(); // notifier immédiatement les autres du changement d'état
+                    return;
                 }
 
                 // En vaisseau : inutile d'envoyer des mises à jour de position
