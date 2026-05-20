@@ -1,0 +1,194 @@
+// ============================================================
+//  PlayerNetworkSync.cs
+//  NetworkBehaviour servant de "proxy réseau" pour chaque joueur.
+//  Utilisé comme PlayerPrefab de NGO (spawn automatique par client).
+//
+//  - IsOwner = true  : copie la position du joueur local dans les
+//    NetworkVariables → synchronisé vers tous les autres peers.
+//  - IsOwner = false : lit les NetworkVariables et anime un mannequin
+//    capsule + nametag représentant le joueur distant.
+// ============================================================
+
+using Unity.Netcode;
+using UnityEngine;
+using UnityEngine.UI;
+
+namespace AstroVoxel.Network
+{
+    [RequireComponent(typeof(NetworkObject))]
+    public sealed class PlayerNetworkSync : NetworkBehaviour
+    {
+        // ── NetworkVariables (owner-writable) ─────────────────
+        private readonly NetworkVariable<Vector3>    _netPos = new(
+            default,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Owner);
+
+        private readonly NetworkVariable<Quaternion> _netRot = new(
+            Quaternion.identity,
+            NetworkVariableReadPermission.Everyone,
+            NetworkVariableWritePermission.Owner);
+
+        // ── Références ────────────────────────────────────────
+        private Transform  _localPlayerTransform;   // lié au joueur local si IsOwner
+        private GameObject _remoteCapsule;          // mannequin pour les joueurs distants
+        private Text       _nameText;
+        private float      _nameFaceCamTimer;
+        private const float NameFaceInterval = 0.1f;
+
+        // Palette Dark Theme cohérente
+        private static readonly Color _bodyColor = new Color(0.30f, 0.55f, 1.00f);
+        private static readonly Color _headColor = new Color(0.38f, 0.62f, 1.00f);
+
+        // ── NGO Lifecycle ─────────────────────────────────────
+
+        public override void OnNetworkSpawn()
+        {
+            if (IsOwner)
+            {
+                // Trouve le PlayerController local (unique dans la scène)
+                var pc = FindAnyObjectByType<AstroVoxel.Player.PlayerController>();
+                if (pc != null) _localPlayerTransform = pc.transform;
+                // Le NetworkObject lui-même n'a pas besoin d'être visible
+                gameObject.name = $"PlayerNet_Local";
+            }
+            else
+            {
+                gameObject.name = $"PlayerNet_{OwnerClientId}";
+                BuildRemoteCapsule();
+            }
+        }
+
+        public override void OnNetworkDespawn()
+        {
+            if (_remoteCapsule != null) Destroy(_remoteCapsule);
+        }
+
+        // ── Update ────────────────────────────────────────────
+
+        private void Update()
+        {
+            if (IsOwner)
+            {
+                if (_localPlayerTransform == null)
+                {
+                    // Lazy-find : le joueur peut avoir été créé après ce GO
+                    var pc = FindAnyObjectByType<AstroVoxel.Player.PlayerController>();
+                    if (pc != null) _localPlayerTransform = pc.transform;
+                    return;
+                }
+                // Publie position/rotation dans les NetworkVariables
+                _netPos.Value = _localPlayerTransform.position;
+                _netRot.Value = _localPlayerTransform.rotation;
+            }
+            else if (_remoteCapsule != null)
+            {
+                // Interpole vers la position synchronisée (20 lerps/s max)
+                _remoteCapsule.transform.position = Vector3.Lerp(
+                    _remoteCapsule.transform.position, _netPos.Value, Time.deltaTime * 15f);
+                _remoteCapsule.transform.rotation = Quaternion.Slerp(
+                    _remoteCapsule.transform.rotation, _netRot.Value, Time.deltaTime * 15f);
+
+                // Orienter le nametag vers la caméra (à 10 Hz)
+                _nameFaceCamTimer += Time.deltaTime;
+                if (_nameFaceCamTimer >= NameFaceInterval)
+                {
+                    _nameFaceCamTimer = 0f;
+                    FaceNameTagToCamera();
+                }
+            }
+        }
+
+        // ── Mannequin distant ─────────────────────────────────
+
+        private void BuildRemoteCapsule()
+        {
+            _remoteCapsule = new GameObject($"RemotePlayer_{OwnerClientId}");
+
+            // ── Corps (capsule) ───────────────────────────────
+            var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            body.name = "Body";
+            body.transform.SetParent(_remoteCapsule.transform, false);
+            body.transform.localPosition = Vector3.up * 0.9f;
+            body.transform.localScale    = new Vector3(0.8f, 0.9f, 0.8f);
+            Object.Destroy(body.GetComponent<Collider>());
+            ApplyColor(body, _bodyColor);
+
+            // ── Tête (sphère) ─────────────────────────────────
+            var head = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            head.name = "Head";
+            head.transform.SetParent(_remoteCapsule.transform, false);
+            head.transform.localPosition = Vector3.up * 1.85f;
+            head.transform.localScale    = Vector3.one * 0.55f;
+            Object.Destroy(head.GetComponent<Collider>());
+            ApplyColor(head, _headColor);
+
+            // ── Nametag world-space ───────────────────────────
+            BuildNameTag();
+        }
+
+        private void BuildNameTag()
+        {
+            var tagGO = new GameObject("NameTag");
+            tagGO.transform.SetParent(_remoteCapsule.transform, false);
+            tagGO.transform.localPosition = Vector3.up * 2.35f;
+
+            var canvas = tagGO.AddComponent<Canvas>();
+            canvas.renderMode   = RenderMode.WorldSpace;
+            canvas.sortingOrder = 5;
+
+            var rt = tagGO.GetComponent<RectTransform>();
+            rt.sizeDelta = new Vector2(3f, 0.5f);
+            tagGO.transform.localScale = Vector3.one * 0.01f;
+
+            var textGO = new GameObject("Text");
+            textGO.transform.SetParent(tagGO.transform, false);
+
+            _nameText = textGO.AddComponent<Text>();
+            _nameText.font      = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _nameText.fontSize  = 36;
+            _nameText.alignment = TextAnchor.MiddleCenter;
+            _nameText.color     = Color.white;
+            _nameText.text      = $"Joueur {OwnerClientId}";
+
+            var textRT = textGO.GetComponent<RectTransform>();
+            textRT.anchorMin = Vector2.zero;
+            textRT.anchorMax = Vector2.one;
+            textRT.offsetMin = textRT.offsetMax = Vector2.zero;
+
+            // Fond semi-transparent
+            var bg = new GameObject("Bg");
+            bg.transform.SetParent(tagGO.transform, false);
+            bg.transform.SetAsFirstSibling();
+            var bgImg = bg.AddComponent<Image>();
+            bgImg.color = new Color(0, 0, 0, 0.55f);
+            var bgRT = bg.GetComponent<RectTransform>();
+            bgRT.anchorMin = Vector2.zero;
+            bgRT.anchorMax = Vector2.one;
+            bgRT.offsetMin = new Vector2(-4f, -2f);
+            bgRT.offsetMax = new Vector2( 4f,  2f);
+        }
+
+        private void FaceNameTagToCamera()
+        {
+            var cam = Camera.main;
+            if (cam == null || _remoteCapsule == null) return;
+
+            var nameTag = _remoteCapsule.transform.Find("NameTag");
+            if (nameTag == null) return;
+
+            Vector3 dir = nameTag.position - cam.transform.position;
+            if (dir.sqrMagnitude < 0.001f) return;
+            nameTag.rotation = Quaternion.LookRotation(dir);
+        }
+
+        private static void ApplyColor(GameObject go, Color color)
+        {
+            var rend = go.GetComponent<Renderer>();
+            if (rend == null) return;
+            var shader = Shader.Find("AstroVoxel/BlockUnlit")
+                      ?? Shader.Find("Universal Render Pipeline/Lit");
+            rend.sharedMaterial = new Material(shader) { color = color };
+        }
+    }
+}

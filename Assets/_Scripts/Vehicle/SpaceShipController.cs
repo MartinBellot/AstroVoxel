@@ -290,7 +290,8 @@ namespace AstroVoxel.Vehicle
                 // Permettre l'embarquement si le joueur est proche et presse F
                 if (_player != null
                     && Vector3.Distance(transform.position, _player.position) <= boardingRadius
-                    && GetKeyDown_Board())
+                    && GetKeyDown_Board()
+                    && !AstroVoxel.Network.ServerManager.IsShipPilotedByRemote)
                 {
                     Board();
                 }

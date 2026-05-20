@@ -217,6 +217,40 @@ namespace AstroVoxel.VoxelEngine
             return true;
         }
 
+        // ── Sync réseau ───────────────────────────────────────
+
+        /// <summary>
+        /// Casse un bloc identifié par ses coordonnées réseau (FaceChunkCoord + local XYZ).
+        /// Utilisé par le réseau (ServerManager / BlockSyncManager) pour appliquer
+        /// une modification validée par le serveur.
+        /// </summary>
+        public bool ApplyNetworkBreak(FaceChunkCoord coord, int lx, int ly, int lz)
+        {
+            if (!_chunks.TryGetValue(coord, out ChunkRenderer cr)) return false;
+            if (!BlockProperties.IsSolid(cr.GetBlock(lx, ly, lz))) return false;
+            cr.SetBlock(lx, ly, lz, BlockType.Air);
+            RecordModification(coord, lx, ly, lz, (byte)BlockType.Air);
+            Vector3 worldPos = cr.transform.TransformPoint(lx + 0.5f, ly + 0.5f, lz + 0.5f);
+            cr.RebuildMesh();
+            RebuildNeighbourChunks(worldPos);
+            return true;
+        }
+
+        /// <summary>
+        /// Pose un bloc identifié par ses coordonnées réseau.
+        /// </summary>
+        public bool ApplyNetworkPlace(FaceChunkCoord coord, int lx, int ly, int lz, BlockType type)
+        {
+            if (!_chunks.TryGetValue(coord, out ChunkRenderer cr)) return false;
+            if (BlockProperties.IsSolid(cr.GetBlock(lx, ly, lz))) return false;
+            cr.SetBlock(lx, ly, lz, type);
+            RecordModification(coord, lx, ly, lz, (byte)type);
+            Vector3 worldPos = cr.transform.TransformPoint(lx + 0.5f, ly + 0.5f, lz + 0.5f);
+            cr.RebuildMesh();
+            RebuildNeighbourChunks(worldPos);
+            return true;
+        }
+
         // ── Suivi des modifications (pour save/load) ──────────
 
         private void RecordModification(FaceChunkCoord coord, int lx, int ly, int lz, byte block)

@@ -5,6 +5,7 @@
 //  C'est le seul MonoBehaviour à placer manuellement.
 // ============================================================
 
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using AstroVoxel.Save;
@@ -14,6 +15,9 @@ using AstroVoxel.Player;
 using AstroVoxel.Environment;
 using AstroVoxel.Vehicle;
 using AstroVoxel.Space;
+using AstroVoxel.Network;
+using Unity.Netcode;
+using Unity.Netcode.Transports.UTP;
 
 namespace AstroVoxel.Bootstrap
 {
@@ -37,6 +41,9 @@ namespace AstroVoxel.Bootstrap
 
         private void Awake()
         {
+            // ── Réseau (avant tout le reste) ─────────────────────────
+            BuildNetworkManager();
+
             // Remet le jeu en mode Créatif à chaque rechargement de scène
             GameModeManager.ResetToCreative();
 
@@ -81,6 +88,23 @@ namespace AstroVoxel.Bootstrap
 
             // Système de sauvegarde (appliquer une save en attente après synchro physique)
             BuildSaveSystem(world, playerBody, infinitePlanetSys);
+
+            // ── Câblage réseau (world + ship disponibles ici) ─────────
+            BuildNetworkComponents(world);
+
+            // ── Auto-reconnect après reload de seed ───────────────────
+            if (ServerManager.PendingJoinCode != null)
+            {
+                string code = ServerManager.PendingJoinCode;
+                ServerManager.PendingJoinCode = null; // évite les boucles infinies
+                StartCoroutine(CoAutoJoin(code));
+            }
+        }
+
+        private IEnumerator CoAutoJoin(string code)
+        {
+            yield return null; // laisse un frame pour finir l'initialisation
+            ServerManager.Instance?.JoinServer(code);
         }
 
         // ── Construction du soleil ──────────────────────────
@@ -333,6 +357,9 @@ namespace AstroVoxel.Bootstrap
             consoleGO.transform.SetParent(canvasGO.transform, false);
             var console = consoleGO.AddComponent<GameConsole>();
             console.Init(canvas, blockInteract);
+
+            // Scoreboard multijoueur (TAB — visible uniquement si réseau actif)
+            Scoreboard.Create(canvas);
         }
 
         // ── EventSystem ─────────────────────────────────────
@@ -501,6 +528,71 @@ namespace AstroVoxel.Bootstrap
             var sys = go.AddComponent<InfinitePlanetSystem>();
             sys.Init(player, blockMaterials);
             return sys;
+        }
+
+        // ── Réseau ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Crée le NetworkManager, le transport et les composants singleton du réseau
+        /// (ServerManager, BlockSyncManager). Appelé en tout premier dans Awake().
+        /// </summary>
+        private static void BuildNetworkManager()
+        {
+            // NetworkManager + UnityTransport
+            var nmGO = new GameObject("NetworkManager");
+            var nm   = nmGO.AddComponent<NetworkManager>();
+            nm.NetworkConfig = new NetworkConfig(); // champ non initialisé par défaut (runtime AddComponent)
+            var transport = nmGO.AddComponent<UnityTransport>();
+            nm.NetworkConfig.NetworkTransport = transport;
+
+            // PlayerPrefab : NetworkObject léger (PlayerNetworkSync crée les visuels à l'spawn)
+            var playerNetPrefab = new GameObject("PlayerNetPrefab");
+            playerNetPrefab.SetActive(false); // template inactif
+            var netObj = playerNetPrefab.AddComponent<NetworkObject>();
+            ForceNetworkObjectHash(netObj, "av.player.v1");
+            playerNetPrefab.AddComponent<PlayerNetworkSync>();
+            DontDestroyOnLoad(playerNetPrefab);
+
+            nm.NetworkConfig.PlayerPrefab = playerNetPrefab;
+
+            // Singleton managers
+            new GameObject("ServerManager").AddComponent<ServerManager>();
+            new GameObject("BlockSyncManager").AddComponent<BlockSyncManager>();
+        }
+
+        /// <summary>
+        /// Câble les références world et ship dans les managers réseau.
+        /// Appelé après que la planète et le vaisseau soient construits.
+        /// </summary>
+        private static void BuildNetworkComponents(PlanetWorld world)
+        {
+            ServerManager.Instance?.SetWorld(world);
+            BlockSyncManager.Instance?.SetWorld(world);
+
+            var ship = FindAnyObjectByType<SpaceShipController>();
+            if (ship != null)
+                ServerManager.Instance?.SetShip(ship);
+        }
+
+        /// <summary>
+        /// Force un hash déterministe sur un NetworkObject créé par code.
+        /// Utilise FNV-1a sur la clé unique → même hash sur host et clients.
+        /// </summary>
+        private static void ForceNetworkObjectHash(NetworkObject netObj, string uniqueKey)
+        {
+            uint hash = FNV1aHash(uniqueKey);
+            var field = typeof(NetworkObject).GetField(
+                "m_GlobalObjectIdHash",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            field?.SetValue(netObj, hash);
+        }
+
+        private static uint FNV1aHash(string s)
+        {
+            uint hash = 2166136261u;
+            foreach (char c in s)
+                hash = (hash ^ (byte)c) * 16777619u;
+            return hash == 0 ? 1u : hash;
         }
 
         // ── Système de sauvegarde ───────────────────────

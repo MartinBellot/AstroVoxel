@@ -6,6 +6,7 @@
 
 using UnityEngine;
 using AstroVoxel.VoxelEngine;
+using AstroVoxel.Network;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -101,9 +102,15 @@ namespace AstroVoxel.Player
             // pour éviter le bug de frontière de face sur les troncs d'arbres.
             ChunkRenderer hitCr = hit.collider?.GetComponent<ChunkRenderer>();
             var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
-            if (pw != null) { pw.BreakBlock(hitCr, pos); return; }
 
-            // Planète de base (fallback si la hiérarchie ne remonte pas à PlanetWorld)
+            // Planète principale → sync réseau via BlockSyncManager (gère aussi le mode hors-ligne)
+            if (pw == world || (pw == null && world != null))
+            {
+                var bsm = BlockSyncManager.Instance;
+                if (bsm != null) { bsm.RequestBreakBlock(hitCr, pos); return; }
+            }
+
+            if (pw != null) { pw.BreakBlock(hitCr, pos); return; }
             world?.BreakBlock(hitCr, pos);
         }
 
@@ -124,10 +131,15 @@ namespace AstroVoxel.Player
             {
                 // Planète infinie (PlanetWorld créé dynamiquement par InfinitePlanetSystem)
                 var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
-                if (pw != null)
+                if (pw != null && pw != world)
                     placed = pw.PlaceBlock(pos, blockToPlace);
-                else if (world != null)
-                    placed = world.PlaceBlock(pos, blockToPlace);
+                else
+                {
+                    var bsm = BlockSyncManager.Instance;
+                    if (bsm != null)       { bsm.RequestPlaceBlock(pos, blockToPlace); placed = true; }
+                    else if (pw != null)   placed = pw.PlaceBlock(pos, blockToPlace);
+                    else if (world != null) placed = world.PlaceBlock(pos, blockToPlace);
+                }
             }
 
             // Empêche le joueur de tomber dans le vide quand il pose un bloc sous ses pieds
@@ -207,7 +219,15 @@ namespace AstroVoxel.Player
                 // (évite le bug de frontière de face sur les troncs d'arbres).
                 ChunkRenderer hitCr = hit.collider?.GetComponent<ChunkRenderer>();
                 var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
-                if (pw != null)   pw.BreakBlock(hitCr, breakPos);
+                // Planète principale → sync réseau
+                if (pw == world || (pw == null && world != null))
+                {
+                    var bsm = BlockSyncManager.Instance;
+                    if (bsm != null) bsm.RequestBreakBlock(hitCr, breakPos);
+                    else if (pw != null) pw.BreakBlock(hitCr, breakPos);
+                    else world?.BreakBlock(hitCr, breakPos);
+                }
+                else if (pw != null) pw.BreakBlock(hitCr, breakPos);
                 else              world?.BreakBlock(hitCr, breakPos);
             }
 
@@ -250,8 +270,15 @@ namespace AstroVoxel.Player
             else
             {
                 var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
-                if (pw != null)        placed = pw.PlaceBlock(placePos, typeToPlace);
-                else if (world != null) placed = world.PlaceBlock(placePos, typeToPlace);
+                if (pw != null && pw != world)
+                    placed = pw.PlaceBlock(placePos, typeToPlace);
+                else
+                {
+                    var bsm = BlockSyncManager.Instance;
+                    if (bsm != null)        { bsm.RequestPlaceBlock(placePos, typeToPlace); placed = true; }
+                    else if (pw != null)    placed = pw.PlaceBlock(placePos, typeToPlace);
+                    else if (world != null) placed = world.PlaceBlock(placePos, typeToPlace);
+                }
             }
 
             if (placed)

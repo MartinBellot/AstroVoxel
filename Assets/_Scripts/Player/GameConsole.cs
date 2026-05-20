@@ -26,6 +26,7 @@ using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 using AstroVoxel.Space;
 using AstroVoxel.Save;
+using AstroVoxel.Network;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -248,6 +249,7 @@ namespace AstroVoxel.Player
                 case "load":    CmdLoad(parts);         break;
                 case "saves":   CmdSaves(parts);         break;
                 case "gamemode": CmdGameMode(parts);      break;
+                case "server":   CmdServer(parts);         break;
                 default:
                     PushErr($"Commande inconnue : <b>{Esc(parts[0])}</b>  —  tapez <b>help</b>");
                     break;
@@ -271,6 +273,9 @@ namespace AstroVoxel.Player
             Push($"  <color=#{H(_blue)}>/saves folder</color>      <color=#{H(_sub)}>Ouvre le dossier des sauvegardes</color>");
             Push($"  <color=#{H(_blue)}>/gamemode survival</color>  <color=#{H(_sub)}>Passe en mode Survie (blocs à miner, vie, craft)</color>");
             Push($"  <color=#{H(_blue)}>/gamemode creative</color>  <color=#{H(_sub)}>Repasse en mode Créatif (placement instantané)</color>");
+            Push($"  <color=#{H(_blue)}>/server host</color>        <color=#{H(_sub)}>Démarre un serveur et affiche le code de connexion</color>");
+            Push($"  <color=#{H(_blue)}>/server join CODE</color>   <color=#{H(_sub)}>Rejoint un serveur à l'aide du code (10 chars)</color>");
+            Push($"  <color=#{H(_blue)}>/server stop</color>        <color=#{H(_sub)}>Se déconnecte du réseau</color>");
             Push(sep);
         }
 
@@ -289,6 +294,47 @@ namespace AstroVoxel.Player
                     break;
                 default:
                     PushErr($"Mode inconnu : {Esc(parts[1])}  —  survival | creative");
+                    break;
+            }
+        }
+
+        private void CmdServer(string[] parts)
+        {
+            var sm = ServerManager.Instance;
+            if (sm == null) { PushErr("ServerManager introuvable."); return; }
+
+            if (parts.Length < 2)
+            {
+                PushErr("Usage : /server host  |  /server join CODE  |  /server stop");
+                return;
+            }
+
+            switch (parts[1].ToLowerInvariant())
+            {
+                case "host":
+                    Push($"<color=#{H(_sub)}>Démarrage du serveur…</color>");
+                    sm.OnHostReady    += code =>
+                        PushOk($"Serveur actif ! Code : <b><color=#{H(_blue)}>{code}</color></b>  — partagez-le à vos amis.");
+                    sm.OnError        += msg => PushErr(msg);
+                    sm.OnStatusMessage+= msg => Push($"<color=#{H(_sub)}>{Esc(msg)}</color>");
+                    sm.HostServer();
+                    break;
+
+                case "join":
+                    if (parts.Length < 3) { PushErr("Usage : /server join CODE"); return; }
+                    Push($"<color=#{H(_sub)}>Connexion en cours…</color>");
+                    sm.OnError        += msg => PushErr(msg);
+                    sm.OnStatusMessage+= msg => Push($"<color=#{H(_sub)}>{Esc(msg)}</color>");
+                    sm.JoinServer(parts[2]);
+                    break;
+
+                case "stop":
+                    sm.Disconnect();
+                    PushOk("Déconnecté du réseau.");
+                    break;
+
+                default:
+                    PushErr($"Sous-commande inconnue : {Esc(parts[1])}  —  host | join | stop");
                     break;
             }
         }
