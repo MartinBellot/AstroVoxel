@@ -116,6 +116,19 @@ namespace AstroVoxel.Editor
                 if (mat.HasProperty("_Metallic"))
                     mat.SetFloat("_Metallic", 0f);
 
+                // Alpha cutout pour les textures PNG avec transparence (cross-blocks)
+                if (IsCrossBlockTexture(texName))
+                {
+                    mat.EnableKeyword("_ALPHATEST_ON");
+                    mat.SetFloat("_Cutoff", 0.5f);
+                    mat.renderQueue = 2450; // AlphaTest
+                }
+                else
+                {
+                    mat.DisableKeyword("_ALPHATEST_ON");
+                    mat.renderQueue = -1;
+                }
+
                 registry.materials[rid] = mat;
                 EditorUtility.SetDirty(mat);
                 updated++;
@@ -132,6 +145,7 @@ namespace AstroVoxel.Editor
                 (ItemType.StoneAxe,      "stone_axe"),
                 (ItemType.WoodenShovel,  "wooden_shovel"),
                 (ItemType.StoneShovel,   "stone_shovel"),
+                (ItemType.MelonSeeds,    "melon_seeds"),
             };
             if (registry.itemMaterials == null || registry.itemMaterials.Length < 20)
                 registry.itemMaterials = new Material[20];
@@ -180,6 +194,9 @@ namespace AstroVoxel.Editor
         ///   Birch (fixe)      #80A755 – tinte fixe, pas biome-dépendant
         ///   Spruce (fixe)     #619961 – tinte fixe
         /// </summary>
+        private static bool IsCrossBlockTexture(string texName)
+            => texName == "short_grass";
+
         private static Color GetBiomeTint(string texName)
         {
             switch (texName)
@@ -187,7 +204,9 @@ namespace AstroVoxel.Editor
                 // ── Grass ────────────────────────────────────────
                 case "grass_block_top":
                     return new Color(0.475f, 0.753f, 0.353f);   // #79C05A plains
-
+                // Herbe courte (même teinte que grass_block_top)
+                case "short_grass":
+                    return new Color(0.475f, 0.753f, 0.353f);   // #79C05A plains
                 // ── Feuillages dépendants du biome ───────────────
                 case "oak_leaves":
                 case "jungle_leaves":
@@ -222,7 +241,7 @@ namespace AstroVoxel.Editor
             // Les plages 108-199 et >220 sont réservées et non utilisées.
             // Air (0) n'a pas de texture.
             if (rid == 0) return true;
-            if (rid > 108 && rid < 200) return true;  // 108 = CraftingTable
+            if (rid > 109 && rid < 200) return true;  // 109 = ShortGrass (dernière plante), puis vide jusqu'à 200
             if (rid > 222) return true;               // 221 = CraftingTableTop, 222 = CraftingTableFront
             return false;
         }

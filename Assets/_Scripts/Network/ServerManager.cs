@@ -65,6 +65,7 @@ namespace AstroVoxel.Network
         internal const string MsgBlocks    = "av.blocks";
         internal const string MsgShipPos   = "av.ship_pos";
         internal const string MsgShipReq   = "av.ship_req";
+        internal const string MsgPlayerPos = "av.player_pos";
 
         // ── Encode/Decode (base36, 10 chars = IPv4 + port) ───
         private const ushort Port  = 7777;
@@ -359,6 +360,37 @@ namespace AstroVoxel.Network
                 BlockSyncManager.Instance?.RegisterBroadcastHandler();
             cmm.RegisterNamedMessageHandler(MsgShipPos,   HandleShipPos);
             cmm.RegisterNamedMessageHandler(MsgShipReq,   HandleShipReqFromClient);
+            cmm.RegisterNamedMessageHandler(MsgPlayerPos, HandlePlayerPos);
+        }
+
+        // Reçu depuis un client (sur le serveur) ou depuis le serveur (sur un client)
+        private void HandlePlayerPos(ulong senderId, FastBufferReader reader)
+        {
+            reader.ReadValueSafe(out ulong clientId);
+            reader.ReadValueSafe(out Vector3 pos);
+            reader.ReadValueSafe(out Quaternion rot);
+
+            var nm = NetworkManager.Singleton;
+            if (nm == null) return;
+
+            // Appliquer localement : mettre à jour le mannequin du joueur
+            PlayerNetworkSync.GetById(clientId)?.SetRemotePosition(pos, rot);
+
+            // Si on est le serveur et que c'est un client qui a envoyé,
+            // relayer à tous les AUTRES clients connectés
+            if (nm.IsServer && senderId != nm.LocalClientId)
+            {
+                using var w = new FastBufferWriter(40, Allocator.Temp);
+                w.WriteValueSafe(clientId);
+                w.WriteValueSafe(pos);
+                w.WriteValueSafe(rot);
+                foreach (var cid in nm.ConnectedClientsIds)
+                {
+                    if (cid == senderId || cid == nm.LocalClientId) continue;
+                    nm.CustomMessagingManager.SendNamedMessage(
+                        MsgPlayerPos, cid, w, NetworkDelivery.UnreliableSequenced);
+                }
+            }
         }
 
         // Reçu par le CLIENT depuis le host

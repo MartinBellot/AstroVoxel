@@ -167,6 +167,9 @@ namespace AstroVoxel.VoxelEngine
             Reg(BlockType.PaleOakLeaves,      "pale_oak_leaves",     "Feuilles de Chêne Pâle");
             Reg(BlockType.CraftingTable,       "crafting_table_side", "Établi");
 
+            // ── Plantes ──────────────────────────────────────────
+            Reg(BlockType.ShortGrass,           "short_grass",         "Herbe Courte");
+
             // ── Face-variants (IDs de rendu internes) ────────────
             // Ces entrées ont un nom de texture mais pas de nom d'affichage.
             RegTex(BlockType.GrassSide,          "grass_block_side");
@@ -418,6 +421,8 @@ namespace AstroVoxel.VoxelEngine
             (byte)BlockType.PaleOakLog,       (byte)BlockType.PaleOakLeaves,
             // Craft
             (byte)BlockType.CraftingTable,
+            // Plantes
+            (byte)BlockType.ShortGrass,
         };
 
         // ── Couleur de repli (si la registry n'est pas encore construite) ─
@@ -440,6 +445,7 @@ namespace AstroVoxel.VoxelEngine
                 case BlockType.Bedrock:            return new UnityEngine.Color(0.25f, 0.25f, 0.28f);
                 case BlockType.Obsidian:           return new UnityEngine.Color(0.12f, 0.06f, 0.18f);
                 case BlockType.Netherrack:         return new UnityEngine.Color(0.60f, 0.18f, 0.18f);
+                case BlockType.ShortGrass:         return new UnityEngine.Color(0.40f, 0.72f, 0.20f);
                 default: return new UnityEngine.Color(0.45f, 0.42f, 0.40f);
             }
         }

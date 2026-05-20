@@ -101,6 +101,20 @@ namespace AstroVoxel.Player
             // Planète infinie ou de base — utilise le ChunkRenderer du collider touché
             // pour éviter le bug de frontière de face sur les troncs d'arbres.
             ChunkRenderer hitCr = hit.collider?.GetComponent<ChunkRenderer>();
+
+            // Si un cross-block (ShortGrass) occupe la case juste au-dessus du bloc solide
+            // touché, casser l'herbe en créatif (exclue de la collision mesh, introuvable au rayon).
+            if (hitCr != null)
+            {
+                Vector3 abovePos   = hit.point + hit.normal * 0.5f;
+                Vector3 aboveLocal = hitCr.transform.InverseTransformPoint(abovePos);
+                int ax = Mathf.Clamp(Mathf.FloorToInt(aboveLocal.x), 0, VoxelData.ChunkWidth  - 1);
+                int ay = Mathf.Clamp(Mathf.FloorToInt(aboveLocal.y), 0, VoxelData.ChunkHeight - 1);
+                int az = Mathf.Clamp(Mathf.FloorToInt(aboveLocal.z), 0, VoxelData.ChunkDepth  - 1);
+                if (BlockProperties.IsCrossBlock(hitCr.GetBlock(ax, ay, az)))
+                    pos = abovePos;
+            }
+
             var pw = hit.collider?.GetComponentInParent<PlanetWorld>();
 
             // Planète principale → sync réseau via BlockSyncManager (gère aussi le mode hors-ligne)
@@ -189,7 +203,11 @@ namespace AstroVoxel.Player
 
         private void BreakBlockSurvival(RaycastHit hit, BlockType blockType)
         {
-            Vector3 breakPos    = hit.point - hit.normal * 0.5f;
+            // Les cross-blocks (ShortGrass) sont au-dessus de la surface touchée,
+            // pas à l'intérieur du bloc solide (à l'opposé des blocs normaux).
+            Vector3 breakPos = BlockProperties.IsCrossBlock(blockType)
+                ? hit.point + hit.normal * 0.5f
+                : hit.point - hit.normal * 0.5f;
             ItemType activeTool = GetActiveSurvivalTool();
             bool hasPickaxe     = activeTool == ItemType.WoodenPickaxe
                                 || activeTool == ItemType.StonePickaxe
@@ -201,6 +219,14 @@ namespace AstroVoxel.Player
             BlockType dropBlock = blockType;
             if (blockType == BlockType.Stone)
                 dropBlock = hasPickaxe ? BlockType.Cobblestone : BlockType.Air;
+
+            // Herbe courte → pas de drop bloc ; 50% de chance d'obtenir des graines
+            bool spawnMelonSeeds = false;
+            if (blockType == BlockType.ShortGrass)
+            {
+                dropBlock = BlockType.Air;
+                spawnMelonSeeds = Random.Range(0, 2) == 0;
+            }
 
             // Minerais → pas de drop sans la bonne pioche
             bool isOre = blockType == BlockType.CoalOre
@@ -232,13 +258,15 @@ namespace AstroVoxel.Player
             }
 
             // Spawner le drop
+            Transform playerTr = playerRigidbody != null
+                ? playerRigidbody.transform
+                : transform;
+
             if (dropBlock != BlockType.Air)
-            {
-                Transform playerTr = playerRigidbody != null
-                    ? playerRigidbody.transform
-                    : transform;
                 BlockDropController.SpawnDrop(dropBlock, breakPos, playerTr, _blockMaterials);
-            }
+
+            if (spawnMelonSeeds)
+                BlockDropController.SpawnItemDrop(ItemType.MelonSeeds, breakPos, playerTr);
         }
 
         private void TryPlaceOrInteractSurvival()
@@ -300,7 +328,28 @@ namespace AstroVoxel.Player
             int lx = Mathf.Clamp(Mathf.FloorToInt(local.x), 0, VoxelData.ChunkWidth  - 1);
             int ly = Mathf.Clamp(Mathf.FloorToInt(local.y), 0, VoxelData.ChunkHeight - 1);
             int lz = Mathf.Clamp(Mathf.FloorToInt(local.z), 0, VoxelData.ChunkDepth  - 1);
-            return (BlockType)cr.GetBlock(lx, ly, lz);
+            var blockType = (BlockType)cr.GetBlock(lx, ly, lz);
+
+            // Les cross-blocks (ShortGrass) n'ont pas de collision propre.
+            // Si on touche la face supérieure d'un bloc solide, vérifier si
+            // un cross-block occupe la case juste au-dessus.
+            if (BlockProperties.IsSolid(blockType))
+            {
+                Vector3 abovePos = hit.point + hit.normal * 0.5f;
+                Vector3 aboveLocal = cr.transform.InverseTransformPoint(abovePos);
+                int ax = Mathf.Clamp(Mathf.FloorToInt(aboveLocal.x), 0, VoxelData.ChunkWidth  - 1);
+                int ay = Mathf.Clamp(Mathf.FloorToInt(aboveLocal.y), 0, VoxelData.ChunkHeight - 1);
+                int az = Mathf.Clamp(Mathf.FloorToInt(aboveLocal.z), 0, VoxelData.ChunkDepth  - 1);
+                // Si la case au-dessus est différente et contient un cross-block, le cibler en priorité
+                if ((ax != lx || ay != ly || az != lz))
+                {
+                    var aboveType = (BlockType)cr.GetBlock(ax, ay, az);
+                    if (BlockProperties.IsCrossBlock(aboveType))
+                        return aboveType;
+                }
+            }
+
+            return blockType;
         }
 
         /// <summary>Retourne le temps en secondes pour miner <paramref name="bt"/> avec l'outil actif.</summary>
@@ -319,6 +368,10 @@ namespace AstroVoxel.Player
                 case BlockType.MangroveLeaves: case BlockType.CherryLeaves: case BlockType.PaleOakLeaves:
                 case BlockType.Grass:
                     return 0.3f;
+
+                // Plantes instantanées
+                case BlockType.ShortGrass:
+                    return 0.05f;
 
                 // Sol
                 case BlockType.Dirt: case BlockType.Sand: case BlockType.RedSand:

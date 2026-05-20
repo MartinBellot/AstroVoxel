@@ -41,6 +41,7 @@ Shader "AstroVoxel/BlockUnlit"
             #pragma vertex   vert
             #pragma fragment frag
             #pragma multi_compile_instancing
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
             // Variantes d'ombres URP (cascades, screen-space)
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW
@@ -89,6 +90,10 @@ Shader "AstroVoxel/BlockUnlit"
                     col.rgb *= lerp(0.35h, 1.0h, mainLight.shadowAttenuation);
                 #endif
 
+                // Alpha clip inconditionnel : les textures opaques ont alpha=1 et
+                // passent toujours (_Cutoff=0.5). Les pixels transparents (short_grass)
+                // sont rejetés immédiatement, sans nécessiter de keyword sur le matériau.
+                clip(col.a - _Cutoff);
                 return col * _BaseColor;
             }
             ENDHLSL
@@ -109,6 +114,7 @@ Shader "AstroVoxel/BlockUnlit"
             #pragma vertex   ShadowPassVertex
             #pragma fragment ShadowPassFragment
             #pragma multi_compile_instancing
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
 
             // UnlitInput.hlsl déclare le CBUFFER UnityPerMaterial complet
             #include "Packages/com.unity.render-pipelines.universal/Shaders/UnlitInput.hlsl"
@@ -130,6 +136,7 @@ Shader "AstroVoxel/BlockUnlit"
             #pragma vertex   DepthOnlyVertex
             #pragma fragment DepthOnlyFragment
             #pragma multi_compile_instancing
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
 
             #include "Packages/com.unity.render-pipelines.universal/Shaders/UnlitInput.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/Shaders/DepthOnlyPass.hlsl"
@@ -167,9 +174,13 @@ Shader "AstroVoxel/BlockUnlit"
                 return o;
             }
 
+            float _Cutoff;
+
             fixed4 frag(v2f i) : SV_Target
             {
-                return tex2D(_BaseMap, i.uv) * _BaseColor;
+                fixed4 col = tex2D(_BaseMap, i.uv) * _BaseColor;
+                clip(col.a - _Cutoff);
+                return col;
             }
             ENDCG
         }

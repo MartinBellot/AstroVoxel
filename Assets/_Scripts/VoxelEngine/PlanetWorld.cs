@@ -175,7 +175,7 @@ namespace AstroVoxel.VoxelEngine
             ChunkRenderer cr = GetChunkAt(worldPos);
             if (cr == null) return false;
             Vector3Int lb = WorldToLocalBlock(worldPos);
-            if (!BlockProperties.IsSolid(cr.GetBlock(lb.x, lb.y, lb.z))) return false;
+            if (!BlockProperties.IsRenderable(cr.GetBlock(lb.x, lb.y, lb.z))) return false;
             cr.SetBlock(lb.x, lb.y, lb.z, BlockType.Air);
             RecordModification(WorldToFaceChunk(worldPos), lb.x, lb.y, lb.z, (byte)BlockType.Air);
             RebuildNeighbourChunks(worldPos);
@@ -198,7 +198,7 @@ namespace AstroVoxel.VoxelEngine
             int ly = Mathf.Clamp(Mathf.FloorToInt(local.y), 0, VoxelData.ChunkHeight - 1);
             int lz = Mathf.Clamp(Mathf.FloorToInt(local.z), 0, VoxelData.ChunkWidth  - 1);
 
-            if (!BlockProperties.IsSolid(cr.GetBlock(lx, ly, lz))) return false;
+            if (!BlockProperties.IsRenderable(cr.GetBlock(lx, ly, lz))) return false;
             cr.SetBlock(lx, ly, lz, BlockType.Air);
             RecordModification(cr.ChunkCoord, lx, ly, lz, (byte)BlockType.Air);
             RebuildNeighbourChunks(worldPos);
@@ -227,7 +227,7 @@ namespace AstroVoxel.VoxelEngine
         public bool ApplyNetworkBreak(FaceChunkCoord coord, int lx, int ly, int lz)
         {
             if (!_chunks.TryGetValue(coord, out ChunkRenderer cr)) return false;
-            if (!BlockProperties.IsSolid(cr.GetBlock(lx, ly, lz))) return false;
+            if (!BlockProperties.IsRenderable(cr.GetBlock(lx, ly, lz))) return false;
             cr.SetBlock(lx, ly, lz, BlockType.Air);
             RecordModification(coord, lx, ly, lz, (byte)BlockType.Air);
             Vector3 worldPos = cr.transform.TransformPoint(lx + 0.5f, ly + 0.5f, lz + 0.5f);

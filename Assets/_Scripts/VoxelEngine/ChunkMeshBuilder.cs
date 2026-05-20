@@ -72,6 +72,55 @@ namespace AstroVoxel.VoxelEngine
         }
 
         /// <summary>
+        /// Construit un mesh de collision minimal (vertices + triangles) contenant
+        /// uniquement les faces des blocs <em>solides</em>. Exclut les cross-blocks
+        /// (ShortGrass…) pour que le joueur traverse les plantes sans collision.
+        /// Pas d'UVs, pas de sous-meshes : usage PhysX exclusivement.
+        /// </summary>
+        public static void BuildCollision(
+            ChunkData data,
+            List<Vector3> vertices,
+            List<int> triangles,
+            Func<int, int, int, byte> getNeighbour)
+        {
+            int width  = data.Width;
+            int height = data.Height;
+
+            for (int z = 0; z < width;  z++)
+            for (int y = 0; y < height; y++)
+            for (int x = 0; x < width;  x++)
+            {
+                byte blockId = data.GetBlock(x, y, z);
+                if (!BlockProperties.IsSolid(blockId)) continue;  // seulement les solides
+
+                for (int face = 0; face < 6; face++)
+                {
+                    int nx = x + VoxelData.FaceChecks[face, 0];
+                    int ny = y + VoxelData.FaceChecks[face, 1];
+                    int nz = z + VoxelData.FaceChecks[face, 2];
+
+                    byte neighbour = data.IsInBounds(nx, ny, nz)
+                        ? data.GetBlock(nx, ny, nz)
+                        : getNeighbour(nx, ny, nz);
+
+                    if (BlockProperties.IsSolid(neighbour)) continue;
+
+                    int vb = vertices.Count;
+                    for (int i = 0; i < 4; i++)
+                    {
+                        int vi = VoxelData.VoxelTris[face, i];
+                        vertices.Add(new Vector3(
+                            x + VoxelData.VoxelVerts[vi, 0],
+                            y + VoxelData.VoxelVerts[vi, 1],
+                            z + VoxelData.VoxelVerts[vi, 2]));
+                    }
+                    triangles.Add(vb + 0); triangles.Add(vb + 1); triangles.Add(vb + 2);
+                    triangles.Add(vb + 2); triangles.Add(vb + 1); triangles.Add(vb + 3);
+                }
+            }
+        }
+
+        /// <summary>
         /// Variante qui oriente les blocs multi-faces (Grass, Logs, Sandstone…)
         /// en fonction de la direction radiale réelle de CHAQUE bloc par rapport
         /// au centre de la planète. Le « top » du grass pointera ainsi toujours
@@ -101,7 +150,7 @@ namespace AstroVoxel.VoxelEngine
             for (int x = 0; x < width;  x++)
             {
                 byte blockId = data.GetBlock(x, y, z);
-                if (!BlockProperties.IsSolid(blockId)) continue;
+                if (!BlockProperties.IsRenderable(blockId)) continue;
 
                 // ── Détermine la face « top » et « bottom » LOGIQUES ──
                 // Logique = par rapport au centre de la planète, pas par
@@ -129,6 +178,13 @@ namespace AstroVoxel.VoxelEngine
                             if (d < bestBottom) { bestBottom = d; bottomFace = f; }
                         }
                     }
+                }
+
+                // ── Blocs en croix (plantes) : pas de loop 6 faces ──
+                if (BlockProperties.IsCrossBlock(blockId))
+                {
+                    AddCross(output, x, y, z, blockId, useRadialOrientation, localUp);
+                    continue;
                 }
 
                 // Teste les 6 faces
@@ -272,6 +328,67 @@ namespace AstroVoxel.VoxelEngine
             float u = Vector3.Dot(off, horiz)    > 0f ? 1f : 0f;
             float v = Vector3.Dot(off, vertical) > 0f ? 1f : 0f;
             output.UVs.Add(new Vector2(u, v));
+        }
+
+        // ── Génération de la géométrie en croix pour les plantes ─
+        // Génère 2 quads perpendiculaires (4 faces avec back-face pour double-sided),
+        // chacun traversant le bloc en diagonale, alignés avec la direction «localUp».
+        private static void AddCross(MeshData output, int x, int y, int z, byte blockId,
+                                     bool useRadialOrientation, Vector3 localUp)
+        {
+            byte renderingId = BlockFaceData.GetRenderingId(blockId, 0);
+            var tris = output.Triangles[renderingId];
+
+            // Axes du plan horizontal perpendiculaire à localUp.
+            // On choisit un vecteur de référence non-colinéaire à localUp.
+            Vector3 up = localUp.sqrMagnitude > 1e-6f ? localUp.normalized : Vector3.up;
+            Vector3 refAxis = Mathf.Abs(Vector3.Dot(up, Vector3.forward)) < 0.99f
+                ? Vector3.forward : Vector3.right;
+            Vector3 horiz1 = Vector3.Normalize(Vector3.Cross(up, refAxis));
+            Vector3 horiz2 = Vector3.Normalize(Vector3.Cross(horiz1, up));
+
+            // Centre du bloc au sol (base de la plante)
+            Vector3 baseCenter = new Vector3(x + 0.5f, y, z + 0.5f);
+            const float HalfW = 0.5f;  // demi-largeur du quad (0.5 = largeur d'un bloc)
+            const float GrassH = 0.6f; // hauteur de la plante en blocs
+
+            // Décalages des 4 coins d'un quad :
+            //   c0 = base, côté -horiz
+            //   c1 = base, côté +horiz
+            //   c2 = haut, côté -horiz
+            //   c3 = haut, côté +horiz
+            // Diagonale 1 : horiz1+horiz2 direction
+            // Diagonale 2 : horiz1-horiz2 direction
+            Vector2[] uvs = { new Vector2(0,0), new Vector2(1,0), new Vector2(0,1), new Vector2(1,1) };
+
+            // Émet un quad double-face (front + back) le long d'un axe diagonal.
+            void EmitQuad(Vector3 diagAxis)
+            {
+                Vector3 offset = diagAxis * HalfW;
+                Vector3 c0 = baseCenter - offset;
+                Vector3 c1 = baseCenter + offset;
+                Vector3 c2 = c0 + up * GrassH;
+                Vector3 c3 = c1 + up * GrassH;
+
+                // Front face
+                int vb = output.Vertices.Count;
+                output.Vertices.Add(c0); output.Vertices.Add(c1);
+                output.Vertices.Add(c2); output.Vertices.Add(c3);
+                foreach (var uv in uvs) output.UVs.Add(uv);
+                tris.Add(vb+0); tris.Add(vb+1); tris.Add(vb+2);
+                tris.Add(vb+2); tris.Add(vb+1); tris.Add(vb+3);
+
+                // Back face (inversée)
+                vb = output.Vertices.Count;
+                output.Vertices.Add(c1); output.Vertices.Add(c0);
+                output.Vertices.Add(c3); output.Vertices.Add(c2);
+                foreach (var uv in uvs) output.UVs.Add(uv);
+                tris.Add(vb+0); tris.Add(vb+1); tris.Add(vb+2);
+                tris.Add(vb+2); tris.Add(vb+1); tris.Add(vb+3);
+            }
+
+            EmitQuad(horiz1 + horiz2);   // diagonale /
+            EmitQuad(horiz1 - horiz2);   // diagonale \
         }
     }
 }

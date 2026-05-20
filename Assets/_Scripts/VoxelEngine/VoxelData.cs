@@ -225,6 +225,9 @@ namespace AstroVoxel.VoxelEngine
         PaleOakLeaves      = 107,
         CraftingTable      = 108,  // établi de craft
 
+        // ── Plantes (transparentes — non-solides pour le culling) ──
+        ShortGrass         = 109,   // herbe courte (croix, comme Minecraft)
+
         // ── IDs de rendu internes (face-variants) ─────────────
         // Ces valeurs ne sont JAMAIS stockées dans les chunks.
         // Elles servent uniquement d'index de sous-mesh dans MeshData.
@@ -266,5 +269,20 @@ namespace AstroVoxel.VoxelEngine
         public static bool IsSolid(byte blockId) => blockId >= SolidMin && blockId <= SolidMax;
 
         public static bool IsSolid(BlockType type) => IsSolid((byte)type);
+
+        /// <summary>
+        /// Retourne true si le bloc doit être rendu (inclut les plantes transparentes comme ShortGrass).
+        /// Les blocs non-solides rendables (ShortGrass) ne culling pas leurs voisins.
+        /// </summary>
+        public static bool IsRenderable(byte blockId)
+            => (blockId >= SolidMin && blockId <= SolidMax)
+            || blockId == (byte)BlockType.ShortGrass;
+
+        public static bool IsRenderable(BlockType type) => IsRenderable((byte)type);
+
+        /// <summary>Retourne true si le bloc doit être rendu en croix (deux quads croisés) plutôt qu'en cube.</summary>
+        public static bool IsCrossBlock(byte blockId) => blockId == (byte)BlockType.ShortGrass;
+
+        public static bool IsCrossBlock(BlockType type) => IsCrossBlock((byte)type);
     }
 }

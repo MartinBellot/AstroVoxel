@@ -196,6 +196,7 @@ namespace AstroVoxel.VoxelEngine
             }
 
             PlaceTrees(data, chunkOriginWorld, planetCenter, chunkRotation);
+            PlaceShortGrass(data, chunkOriginWorld, planetCenter, chunkRotation);
         }
 
         // ── Génération des arbres ─────────────────────────────
@@ -477,9 +478,41 @@ namespace AstroVoxel.VoxelEngine
 
             if (cfg.HasTrees)
                 PlaceTreesWithConfig(data, chunkOriginWorld, planetCenter, chunkRotation, in cfg);
+            PlaceShortGrass(data, chunkOriginWorld, planetCenter, chunkRotation);
         }
 
         // ── Blocs de surface par biome ────────────────────────
+
+        /// <summary>
+        /// Place de l'herbe courte (ShortGrass) de façon déterministe sur les blocs Grass
+        /// qui ont un bloc Air directement au-dessus (~30% de chance par position).
+        /// </summary>
+        private static void PlaceShortGrass(ChunkData data, Vector3 chunkOrigin,
+                                            Vector3 planetCenter, Quaternion chunkRotation)
+        {
+            int w = data.Width;
+            int h = data.Height;
+
+            for (int z = 0; z < w; z++)
+            for (int y = 0; y < h - 1; y++)
+            for (int x = 0; x < w;  x++)
+            {
+                if (data.GetBlock(x, y, z) != (byte)BlockType.Grass) continue;
+                if (data.GetBlock(x, y + 1, z) != (byte)BlockType.Air) continue;
+
+                // Hash déterministe basé sur la position monde du bloc.
+                Vector3 wp = chunkOrigin + chunkRotation * new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
+                int wx = Mathf.FloorToInt(wp.x);
+                int wy = Mathf.FloorToInt(wp.y);
+                int wz = Mathf.FloorToInt(wp.z);
+                int hash = wx * 374761393 ^ wy * 668265263 ^ wz * -2048144789;
+                hash = (hash ^ (hash >> 13)) * 1274126177;
+                hash ^= (hash >> 16);
+                if (((hash & 0xFF) + 256) % 256 > 76) continue; // ~30 % (76/255)
+
+                data.SetBlock(x, y + 1, z, (byte)BlockType.ShortGrass);
+            }
+        }
 
         private static byte GetSurfaceBlock(PlanetBiome biome, Vector3 pos, float so, float altNoise)
         {

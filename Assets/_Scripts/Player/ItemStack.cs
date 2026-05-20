@@ -67,6 +67,9 @@ namespace AstroVoxel.Player
         StoneAxe        = 305,
         WoodenShovel    = 306,
         StoneShovel     = 307,
+
+        // ── Graines / consommables ─────────────────────────────────
+        MelonSeeds      = 308,
     }
 
     // ============================================================
@@ -98,7 +101,7 @@ namespace AstroVoxel.Player
         }
 
         /// <summary>True si l'item est un outil (pioche, hache…).</summary>
-        public bool IsTool() => (int)itemType >= 300;
+        public bool IsTool() => (int)itemType >= 300 && (int)itemType <= 307;
     }
 
     // ============================================================
@@ -127,6 +130,7 @@ namespace AstroVoxel.Player
                 case ItemType.StoneAxe:       return "Hache en Pierre";
                 case ItemType.WoodenShovel:   return "Pelle en Bois";
                 case ItemType.StoneShovel:    return "Pelle en Pierre";
+                case ItemType.MelonSeeds:     return "Graines de Melon";
                 default:
                     int id = (int)t;
                     if (id >= 1 && id <= 255)

@@ -31,6 +31,11 @@ namespace AstroVoxel.VoxelEngine
         private ChunkData _chunkData;
         private MeshData  _meshData;
         private Mesh      _mesh;
+        // Mesh de collision séparé : solides uniquement, sans les cross-blocks (plantes).
+        // Le joueur traversera les ShortGrass sans collision physique.
+        private Mesh              _collisionMesh;
+        private readonly List<Vector3> _collisionVerts = new List<Vector3>(2048);
+        private readonly List<int>     _collisionTris  = new List<int>(6144);
 
         // Liste des renderingIds actifs (réutilisée pour éviter les allocations)
         private readonly List<int> _activeRids = new List<int>(32);
@@ -70,8 +75,9 @@ namespace AstroVoxel.VoxelEngine
             _meshRenderer = GetComponent<MeshRenderer>();
             _meshCollider = GetComponent<MeshCollider>();
 
-            _mesh     = new Mesh { name = "ChunkMesh" };
-            _meshData = new MeshData();
+            _mesh          = new Mesh { name = "ChunkMesh" };
+            _collisionMesh = new Mesh { name = "ChunkCollision" };
+            _meshData      = new MeshData();
 
             if (_fallbackMat == null)
             {
@@ -146,8 +152,9 @@ namespace AstroVoxel.VoxelEngine
                 _meshFilter   = GetComponent<MeshFilter>();
                 _meshRenderer = GetComponent<MeshRenderer>();
                 _meshCollider = GetComponent<MeshCollider>();
-                _mesh     = new Mesh { name = "ChunkMesh" };
-                _meshData = new MeshData();
+                _mesh          = new Mesh { name = "ChunkMesh" };
+                _collisionMesh = new Mesh { name = "ChunkCollision" };
+                _meshData      = new MeshData();
                 if (_fallbackMat == null)
                 {
                     _fallbackMat = new Material(Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Diffuse"));
@@ -292,18 +299,29 @@ namespace AstroVoxel.VoxelEngine
             }
 
             // Force le re-bake du MeshCollider.
-            // Si le mesh est vide (chunk entièrement creusé), on détache le collider
-            // pour éviter le warning "mesh doesn't have any vertices" de PhysX.
+            // Utilise un mesh de collision séparé (solides uniquement) pour que
+            // le joueur traverse les plantes (ShortGrass…) sans être bloqué.
+            _collisionVerts.Clear();
+            _collisionTris.Clear();
+            ChunkMeshBuilder.BuildCollision(_chunkData, _collisionVerts, _collisionTris, GetNeighbourForMesh);
+            _collisionMesh.Clear();
+            if (_collisionVerts.Count > 0)
+            {
+                _collisionMesh.SetVertices(_collisionVerts);
+                _collisionMesh.SetTriangles(_collisionTris, 0);
+                _collisionMesh.RecalculateBounds();
+            }
             _meshCollider.sharedMesh = null;
-            if (_meshData.Vertices.Count > 0)
-                _meshCollider.sharedMesh = _mesh;
+            if (_collisionVerts.Count > 0)
+                _meshCollider.sharedMesh = _collisionMesh;
         }
 
         // ── Nettoyage ─────────────────────────────────────────
 
         private void OnDestroy()
         {
-            if (_mesh != null) Destroy(_mesh);
+            if (_mesh != null)          Destroy(_mesh);
+            if (_collisionMesh != null) Destroy(_collisionMesh);
         }
     }
 }

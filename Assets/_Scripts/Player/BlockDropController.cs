@@ -93,6 +93,64 @@ namespace AstroVoxel.Player
             ctrl.StartCoroutine(ctrl.CoEnablePickup());
         }
 
+        /// <summary>
+        /// Crée un drop d'item (non-bloc, ex. graines) à la position world-space indiquée.
+        /// </summary>
+        public static void SpawnItemDrop(
+            ItemType itemType,
+            Vector3 worldPos,
+            Transform player,
+            Material[] itemMaterials = null)
+        {
+            if (!GameModeManager.IsSurvival) return;
+            if (itemType == ItemType.None) return;
+
+            // Quad visuel (ressemble à une icône 2D)
+            var go     = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            go.name    = $"Drop_{itemType}";
+            go.transform.position   = worldPos + Vector3.up * 0.5f;
+            go.transform.localScale = Vector3.one * 0.45f;
+
+            var renderer = go.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                // Les items non-blocs commencent à ID 300 ; l'index dans le tableau est ID-300.
+                int idx = (int)itemType - 300;
+
+                // Si le tableau de matériaux n'est pas fourni, tenter de le charger depuis le registry.
+                if (itemMaterials == null)
+                {
+                    var reg = Resources.Load<AstroVoxel.VoxelEngine.BlockTextureRegistry>("BlockTextureRegistry");
+                    if (reg != null) itemMaterials = reg.itemMaterials;
+                }
+
+                Material mat = (itemMaterials != null && idx >= 0 && idx < itemMaterials.Length && itemMaterials[idx] != null)
+                    ? itemMaterials[idx]
+                    : null;
+
+                if (mat != null)
+                    renderer.sharedMaterial = mat;
+                else
+                    renderer.material.color = AstroVoxel.VoxelEngine.BlockFaceData.GetFallbackColor(
+                        AstroVoxel.VoxelEngine.BlockType.Grass); // couleur herbe comme placeholder
+            }
+
+            var rb = go.GetComponent<Rigidbody>();
+            if (rb != null) Destroy(rb);
+
+            var col = go.GetComponent<Collider>();
+            if (col != null) col.isTrigger = true;
+
+            var ctrl       = go.AddComponent<BlockDropController>();
+            ctrl._player   = player;
+            ctrl._itemType = itemType;
+            ctrl._basePos  = go.transform.position;
+            ctrl._bobPhase = Random.Range(0f, Mathf.PI * 2f);
+
+            Destroy(go, LifeTime);
+            ctrl.StartCoroutine(ctrl.CoEnablePickup());
+        }
+
         // ── Cycle de vie ──────────────────────────────────────
 
         private void Update()

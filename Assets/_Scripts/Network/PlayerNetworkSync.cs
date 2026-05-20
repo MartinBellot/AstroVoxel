@@ -9,6 +9,8 @@
 //    capsule + nametag représentant le joueur distant.
 // ============================================================
 
+using System.Collections.Generic;
+using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.UI;
@@ -18,7 +20,13 @@ namespace AstroVoxel.Network
     [RequireComponent(typeof(NetworkObject))]
     public sealed class PlayerNetworkSync : NetworkBehaviour
     {
-        // ── Position distante reçue par RPC (non-owner) ───────
+        // ── Registre statique : lookup par OwnerClientId ────
+        private static readonly Dictionary<ulong, PlayerNetworkSync> _registry = new();
+
+        public static PlayerNetworkSync GetById(ulong clientId) =>
+            _registry.TryGetValue(clientId, out var s) ? s : null;
+
+        // ── Position distante (non-owner) ────────────────
         private Vector3    _remoteTargetPos;
         private Quaternion _remoteTargetRot = Quaternion.identity;
         private bool       _hasRemotePosition;
@@ -42,6 +50,8 @@ namespace AstroVoxel.Network
 
         public override void OnNetworkSpawn()
         {
+            _registry[OwnerClientId] = this;
+
             if (IsOwner)
             {
                 var pc = FindAnyObjectByType<AstroVoxel.Player.PlayerController>();
@@ -57,27 +67,50 @@ namespace AstroVoxel.Network
 
         public override void OnNetworkDespawn()
         {
+            _registry.Remove(OwnerClientId);
             if (_remoteCapsule != null) Destroy(_remoteCapsule);
         }
 
-        // ── RPCs position ─────────────────────────────────────
+        // ── API publique : appelée par ServerManager ──────
 
-        // Owner → Server : envoie la position locale
-        [Rpc(SendTo.Server, RequireOwnership = true)]
-        private void UpdatePositionServerRpc(Vector3 pos, Quaternion rot)
+        public void SetRemotePosition(Vector3 pos, Quaternion rot)
         {
-            // Le serveur relaie à tous les clients
-            UpdatePositionClientRpc(pos, rot);
-        }
-
-        // Server → tous les clients : mise à jour de la cible
-        [Rpc(SendTo.ClientsAndHost)]
-        private void UpdatePositionClientRpc(Vector3 pos, Quaternion rot)
-        {
-            if (IsOwner) return; // l'owner n'a pas besoin de se mettre à jour lui-même
+            if (IsOwner) return;
             _remoteTargetPos   = pos;
             _remoteTargetRot   = rot;
             _hasRemotePosition = true;
+        }
+
+        // ── Envoi de position (CustomMessaging) ──────────────
+
+        private void SendPositionUpdate()
+        {
+            var nm = NetworkManager.Singleton;
+            if (nm == null) return;
+
+            using var w = new FastBufferWriter(40, Allocator.Temp);
+            w.WriteValueSafe(OwnerClientId);
+            w.WriteValueSafe(_localPlayerTransform.position);
+            w.WriteValueSafe(_localPlayerTransform.rotation);
+
+            if (nm.IsServer)
+            {
+                // HOST : envoie directement sa position à chaque client connecté
+                foreach (var cid in nm.ConnectedClientsIds)
+                {
+                    if (cid == nm.LocalClientId) continue;
+                    nm.CustomMessagingManager.SendNamedMessage(
+                        ServerManager.MsgPlayerPos, cid, w,
+                        NetworkDelivery.UnreliableSequenced);
+                }
+            }
+            else
+            {
+                // CLIENT : envoie au serveur qui relaiera aux autres
+                nm.CustomMessagingManager.SendNamedMessage(
+                    ServerManager.MsgPlayerPos, NetworkManager.ServerClientId, w,
+                    NetworkDelivery.UnreliableSequenced);
+            }
         }
 
         // ── Update ────────────────────────────────────────────
@@ -92,15 +125,11 @@ namespace AstroVoxel.Network
                     if (pc != null) _localPlayerTransform = pc.transform;
                     return;
                 }
-                // Envoi de position à 10 Hz via ServerRpc
+                // Envoi de position à 10 Hz via CustomMessaging
                 _syncTimer += Time.deltaTime;
-                if (_syncTimer >= SyncInterval)
-                {
-                    _syncTimer = 0f;
-                    UpdatePositionServerRpc(
-                        _localPlayerTransform.position,
-                        _localPlayerTransform.rotation);
-                }
+                if (_syncTimer < SyncInterval) return;
+                _syncTimer = 0f;
+                SendPositionUpdate();
             }
             else if (_remoteCapsule != null && _hasRemotePosition)
             {
