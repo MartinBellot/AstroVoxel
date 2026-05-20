@@ -63,7 +63,7 @@ namespace AstroVoxel.Network
         // ── RPCs position ─────────────────────────────────────
 
         // Owner → Server : envoie la position locale
-        [ServerRpc(RequireOwnership = true)]
+        [Rpc(SendTo.Server, RequireOwnership = true)]
         private void UpdatePositionServerRpc(Vector3 pos, Quaternion rot)
         {
             // Le serveur relaie à tous les clients
@@ -71,7 +71,7 @@ namespace AstroVoxel.Network
         }
 
         // Server → tous les clients : mise à jour de la cible
-        [ClientRpc]
+        [Rpc(SendTo.ClientsAndHost)]
         private void UpdatePositionClientRpc(Vector3 pos, Quaternion rot)
         {
             if (IsOwner) return; // l'owner n'a pas besoin de se mettre à jour lui-même
