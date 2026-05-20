@@ -117,6 +117,7 @@ namespace AstroVoxel.Player
             bool pressEsc = Input.GetKeyDown(KeyCode.Escape);
 #endif
             if (toggleE && AstroVoxel.Vehicle.SpaceShipController.IsAnyShipPiloted) toggleE = false;
+            if (toggleE && GameConsole.IsOpen) toggleE = false;
 
             if (toggleE)
             {
