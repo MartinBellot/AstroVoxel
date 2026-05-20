@@ -97,7 +97,7 @@ namespace AstroVoxel.Network
         }
 
         /// <summary>True si N'IMPORTE quel vaisseau est piloté à distance (compat).</summary>
-        public static bool IsShipPilotedByRemote =>
+        public static bool IsAnyShipPilotedByRemote =>
             IsNetworkActive && !IsHost && Instance != null
             && (Time.time - Instance._lastShipPosReceived) < 2f;
 
