@@ -3,9 +3,9 @@
 //  NetworkBehaviour servant de "proxy réseau" pour chaque joueur.
 //  Utilisé comme PlayerPrefab de NGO (spawn automatique par client).
 //
-//  - IsOwner = true  : copie la position du joueur local dans les
-//    NetworkVariables → synchronisé vers tous les autres peers.
-//  - IsOwner = false : lit les NetworkVariables et anime un mannequin
+//  - IsOwner = true  : envoie la position locale via ServerRpc → ClientRpc
+//                      (plus fiable que NetworkVariable owner-write en NGO 2.x).
+//  - IsOwner = false : reçoit les positions via ClientRpc et anime un mannequin
 //    capsule + nametag représentant le joueur distant.
 // ============================================================
 
@@ -18,20 +18,18 @@ namespace AstroVoxel.Network
     [RequireComponent(typeof(NetworkObject))]
     public sealed class PlayerNetworkSync : NetworkBehaviour
     {
-        // ── NetworkVariables (owner-writable) ─────────────────
-        private readonly NetworkVariable<Vector3>    _netPos = new(
-            default,
-            NetworkVariableReadPermission.Everyone,
-            NetworkVariableWritePermission.Owner);
+        // ── Position distante reçue par RPC (non-owner) ───────
+        private Vector3    _remoteTargetPos;
+        private Quaternion _remoteTargetRot = Quaternion.identity;
+        private bool       _hasRemotePosition;
 
-        private readonly NetworkVariable<Quaternion> _netRot = new(
-            Quaternion.identity,
-            NetworkVariableReadPermission.Everyone,
-            NetworkVariableWritePermission.Owner);
+        // ── Timer d'envoi de position (owner) ─────────────────
+        private float      _syncTimer;
+        private const float SyncInterval = 0.1f; // 10 Hz
 
         // ── Références ────────────────────────────────────────
-        private Transform  _localPlayerTransform;   // lié au joueur local si IsOwner
-        private GameObject _remoteCapsule;          // mannequin pour les joueurs distants
+        private Transform  _localPlayerTransform;
+        private GameObject _remoteCapsule;
         private Text       _nameText;
         private float      _nameFaceCamTimer;
         private const float NameFaceInterval = 0.1f;
@@ -46,42 +44,40 @@ namespace AstroVoxel.Network
         {
             if (IsOwner)
             {
-                // Trouve le PlayerController local (unique dans la scène)
                 var pc = FindAnyObjectByType<AstroVoxel.Player.PlayerController>();
                 if (pc != null) _localPlayerTransform = pc.transform;
-                // Le NetworkObject lui-même n'a pas besoin d'être visible
-                gameObject.name = $"PlayerNet_Local";
+                gameObject.name = "PlayerNet_Local";
             }
             else
             {
                 gameObject.name = $"PlayerNet_{OwnerClientId}";
-                BuildRemoteCapsule();      // appelle aussi BuildNameTag() en interne
-
-                // S'abonner au changement de valeur : snap au premier changement
-                _netPos.OnValueChanged += OnRemotePosChanged;
-
-                // Si la valeur est déjà répliquée à la spawn (valeur non-nulle), snap immédiat
-                if (_netPos.Value.sqrMagnitude > 0.01f)
-                    SnapToNetworkPosition();
+                BuildRemoteCapsule();
             }
         }
 
         public override void OnNetworkDespawn()
         {
-            _netPos.OnValueChanged -= OnRemotePosChanged;
             if (_remoteCapsule != null) Destroy(_remoteCapsule);
         }
 
-        // Callback : déclenché chaque fois que _netPos change (y.c. la 1ère valeur réelle)
-        private void OnRemotePosChanged(Vector3 oldVal, Vector3 newVal)
+        // ── RPCs position ─────────────────────────────────────
+
+        // Owner → Server : envoie la position locale
+        [ServerRpc(RequireOwnership = true)]
+        private void UpdatePositionServerRpc(Vector3 pos, Quaternion rot)
         {
-            if (_remoteCapsule == null) return;
-            // Snap sans lerp dès qu'on reçoit la première position non-nulle
-            if (oldVal.sqrMagnitude < 0.01f && newVal.sqrMagnitude > 0.01f)
-            {
-                _remoteCapsule.transform.position = newVal;
-                _remoteCapsule.transform.rotation = _netRot.Value;
-            }
+            // Le serveur relaie à tous les clients
+            UpdatePositionClientRpc(pos, rot);
+        }
+
+        // Server → tous les clients : mise à jour de la cible
+        [ClientRpc]
+        private void UpdatePositionClientRpc(Vector3 pos, Quaternion rot)
+        {
+            if (IsOwner) return; // l'owner n'a pas besoin de se mettre à jour lui-même
+            _remoteTargetPos   = pos;
+            _remoteTargetRot   = rot;
+            _hasRemotePosition = true;
         }
 
         // ── Update ────────────────────────────────────────────
@@ -92,31 +88,35 @@ namespace AstroVoxel.Network
             {
                 if (_localPlayerTransform == null)
                 {
-                    // Lazy-find : le joueur peut avoir été créé après ce GO
                     var pc = FindAnyObjectByType<AstroVoxel.Player.PlayerController>();
                     if (pc != null) _localPlayerTransform = pc.transform;
                     return;
                 }
-                // Publie position/rotation dans les NetworkVariables
-                _netPos.Value = _localPlayerTransform.position;
-                _netRot.Value = _localPlayerTransform.rotation;
+                // Envoi de position à 10 Hz via ServerRpc
+                _syncTimer += Time.deltaTime;
+                if (_syncTimer >= SyncInterval)
+                {
+                    _syncTimer = 0f;
+                    UpdatePositionServerRpc(
+                        _localPlayerTransform.position,
+                        _localPlayerTransform.rotation);
+                }
             }
-            else if (_remoteCapsule != null)
+            else if (_remoteCapsule != null && _hasRemotePosition)
             {
-                // Téléporte si trop loin (>5 unités : grande distance = snap, petite = lerp)
-                float sqrDist = (_remoteCapsule.transform.position - _netPos.Value).sqrMagnitude;
+                // Téléporte si > 5 unités, sinon lerp fluide
+                float sqrDist = (_remoteCapsule.transform.position - _remoteTargetPos).sqrMagnitude;
                 if (sqrDist > 25f)
                 {
-                    _remoteCapsule.transform.position = _netPos.Value;
-                    _remoteCapsule.transform.rotation = _netRot.Value;
+                    _remoteCapsule.transform.position = _remoteTargetPos;
+                    _remoteCapsule.transform.rotation = _remoteTargetRot;
                 }
                 else
                 {
-                    // Interpole chaque frame pour un mouvement fluide
                     _remoteCapsule.transform.position = Vector3.Lerp(
-                        _remoteCapsule.transform.position, _netPos.Value, Time.deltaTime * 15f);
+                        _remoteCapsule.transform.position, _remoteTargetPos, Time.deltaTime * 15f);
                     _remoteCapsule.transform.rotation = Quaternion.Slerp(
-                        _remoteCapsule.transform.rotation, _netRot.Value, Time.deltaTime * 15f);
+                        _remoteCapsule.transform.rotation, _remoteTargetRot, Time.deltaTime * 15f);
                 }
 
                 // Orienter le nametag vers la caméra (à 10 Hz)
@@ -199,14 +199,7 @@ namespace AstroVoxel.Network
             bgRT.offsetMax = new Vector2( 4f,  2f);
         }
 
-        // ── Positionnement initial après spawn ────────────────
-        // La NetworkVariable est déjà répliquée à la spawn → on snap directement.
-        private void SnapToNetworkPosition()
-        {
-            if (_remoteCapsule == null) return;
-            _remoteCapsule.transform.position = _netPos.Value;
-            _remoteCapsule.transform.rotation = _netRot.Value;
-        }
+        // ── Orientation du nametag ────────────────────────────
 
         private void FaceNameTagToCamera()
         {
