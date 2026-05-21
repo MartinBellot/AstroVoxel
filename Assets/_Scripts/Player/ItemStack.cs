@@ -70,6 +70,9 @@ namespace AstroVoxel.Player
 
         // ── Graines / consommables ─────────────────────────────────
         MelonSeeds      = 308,
+
+        // ── Équipement spatial ────────────────────────────────
+        Propulseur      = 309,
     }
 
     // ============================================================
@@ -100,8 +103,8 @@ namespace AstroVoxel.Player
             return id >= 1 && id <= 108;
         }
 
-        /// <summary>True si l'item est un outil (pioche, hache…).</summary>
-        public bool IsTool() => (int)itemType >= 300 && (int)itemType <= 307;
+        /// <summary>True si l'item est un outil ou équipement (pioche, hache, propulseur…).</summary>
+        public bool IsTool() => (int)itemType >= 300;
     }
 
     // ============================================================
@@ -131,6 +134,7 @@ namespace AstroVoxel.Player
                 case ItemType.WoodenShovel:   return "Pelle en Bois";
                 case ItemType.StoneShovel:    return "Pelle en Pierre";
                 case ItemType.MelonSeeds:     return "Graines de Melon";
+                case ItemType.Propulseur:     return "Propulseur";
                 default:
                     int id = (int)t;
                     if (id >= 1 && id <= 255)

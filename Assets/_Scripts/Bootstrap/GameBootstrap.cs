@@ -252,6 +252,10 @@ namespace AstroVoxel.Bootstrap
             var blockInteract = playerGO.AddComponent<BlockInteraction>();
             blockInteract.Init(playerCam, world, rb);
 
+            // PropulseurController (item de propulsion spatiale)
+            var propulseur = playerGO.AddComponent<PropulseurController>();
+            propulseur.Init(playerCam, rb, blockInteract);
+
             // PlayerHealth (mode Survie)
             playerGO.AddComponent<PlayerHealth>();
 

@@ -54,7 +54,31 @@ namespace AstroVoxel.Player
         private int       _survivalHotbarIndex;
         private SurvivalInventory _survivalInventory;
         private Material[]        _blockMaterials;
+        // ── Mode Créatif : items non-blocs par slot ────────────────────────────────────────────────
+        private readonly ItemType[] _creativeHotbarItemTypes = new ItemType[9];
 
+        /// <summary>True en mode créatif quand le slot actif contient le Propulseur.</summary>
+        public bool CreativePropulseurActive =>
+            !GameModeManager.IsSurvival
+            && _hotbarIndex >= 0 && _hotbarIndex < _creativeHotbarItemTypes.Length
+            && _creativeHotbarItemTypes[_hotbarIndex] == ItemType.Propulseur;
+
+        /// <summary>Retourne l'ItemType non-bloc stocké dans un slot créatif (None si aucun).</summary>
+        public ItemType GetCreativeHotbarItem(int slot) =>
+            (slot >= 0 && slot < _creativeHotbarItemTypes.Length)
+                ? _creativeHotbarItemTypes[slot]
+                : ItemType.None;
+
+        /// <summary>
+        /// Place un item non-bloc dans un slot de la hotbar créative.
+        /// Équivalent de SetHotbarSlot pour les items (Propulseur…).
+        /// </summary>
+        public void SetCreativeHotbarItemSlot(int slot, ItemType item)
+        {
+            if (slot < 0 || slot >= _hotbar.Length) return;
+            _creativeHotbarItemTypes[slot] = item;
+            _hotbar[slot] = BlockType.Air;
+        }
         /// <summary>Progression du minage en cours (0-1). 0 si inactif.</summary>
         public float MineProgress => _mineRequiredTime > 0f
             ? Mathf.Clamp01(_mineTimer / _mineRequiredTime)
@@ -80,7 +104,8 @@ namespace AstroVoxel.Player
             {
                 ResetMining();
                 if (GetMouseDown(0)) TryBreakBlock();
-                if (GetMouseDown(1)) TryPlaceBlock();
+                // Clic droit : laisser le PropulseurController gérer si actif
+                if (GetMouseDown(1) && !CreativePropulseurActive) TryPlaceBlock();
             }
 
             // Scroll ou touches pour changer le bloc actif
@@ -616,27 +641,28 @@ namespace AstroVoxel.Player
 
         private void HandleBlockSelection()
         {
+            bool slotChanged = false;
 #if ENABLE_INPUT_SYSTEM
             var mouse = Mouse.current;
             if (mouse != null)
             {
                 float scroll = mouse.scroll.y.ReadValue();
-                if (scroll > 0f)  _hotbarIndex = (_hotbarIndex + 1) % _hotbar.Length;
-                if (scroll < 0f)  _hotbarIndex = (_hotbarIndex - 1 + _hotbar.Length) % _hotbar.Length;
+                if (scroll > 0f)  { _hotbarIndex = (_hotbarIndex + 1) % _hotbar.Length; slotChanged = true; }
+                if (scroll < 0f)  { _hotbarIndex = (_hotbarIndex - 1 + _hotbar.Length) % _hotbar.Length; slotChanged = true; }
             }
             var kb = Keyboard.current;
             if (kb != null)
                 for (int i = 0; i < _hotbar.Length; i++)
                     if (kb[(Key)(Key.Digit1 + i)].wasPressedThisFrame)
-                        _hotbarIndex = i;
+                    { _hotbarIndex = i; slotChanged = true; }
 #else
             float scroll = Input.GetAxisRaw("Mouse ScrollWheel");
-            if (scroll > 0f)  _hotbarIndex = (_hotbarIndex + 1) % _hotbar.Length;
-            if (scroll < 0f)  _hotbarIndex = (_hotbarIndex - 1 + _hotbar.Length) % _hotbar.Length;
+            if (scroll > 0f)  { _hotbarIndex = (_hotbarIndex + 1) % _hotbar.Length; slotChanged = true; }
+            if (scroll < 0f)  { _hotbarIndex = (_hotbarIndex - 1 + _hotbar.Length) % _hotbar.Length; slotChanged = true; }
 
             for (int i = 0; i < _hotbar.Length; i++)
                 if (Input.GetKeyDown(KeyCode.Alpha1 + i))
-                    _hotbarIndex = i;
+                { _hotbarIndex = i; slotChanged = true; }
 #endif
             if (GameModeManager.IsSurvival)
             {
@@ -650,7 +676,9 @@ namespace AstroVoxel.Player
             }
             else
             {
-                blockToPlace = _hotbar[_hotbarIndex];
+                // Si le slot actif contient un item spécial, blockToPlace = Air (pas de bloc à poser)
+                ItemType creativeItem = _creativeHotbarItemTypes[_hotbarIndex];
+                blockToPlace = (creativeItem != ItemType.None) ? BlockType.Air : _hotbar[_hotbarIndex];
             }
         }
 
@@ -680,7 +708,10 @@ namespace AstroVoxel.Player
         public void SetHotbarSlot(int slot, BlockType t)
         {
             if (slot >= 0 && slot < _hotbar.Length)
+            {
                 _hotbar[slot] = t;
+                _creativeHotbarItemTypes[slot] = ItemType.None;  // efface l'item non-bloc
+            }
         }
 
         /// <summary>
@@ -690,7 +721,10 @@ namespace AstroVoxel.Player
         public void ClearInventory()
         {
             for (int i = 0; i < _hotbar.Length; i++)
+            {
                 _hotbar[i] = BlockType.Air;
+                _creativeHotbarItemTypes[i] = ItemType.None;
+            }
             _hotbarIndex = 0;
             blockToPlace = BlockType.Air;
         }

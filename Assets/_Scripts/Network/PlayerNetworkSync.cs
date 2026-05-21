@@ -347,9 +347,12 @@ namespace AstroVoxel.Network
 
         private void BuildRemoteCapsule()
         {
+            EnsureSkinLoaded();
+            bool hasSkin = _skinMaterial != null;
+
             _remoteCapsule = new GameObject($"RemotePlayer_{_clientId}");
 
-            // Couleur de chemise unique par joueur (répartition dorée sur la teinte)
+            // Couleurs de fallback (utilisées si skin.png non trouvé)
             float hue        = ((_clientId * 137UL) % 360UL) / 360f;
             Color shirtColor = Color.HSVToRGB(hue, 0.65f, 0.90f);
             Color pantsColor = Color.HSVToRGB((hue + 0.55f) % 1f, 0.70f, 0.55f);
@@ -364,61 +367,104 @@ namespace AstroVoxel.Network
             _bodyPivot = bodyGO.transform;
 
             // Torse  (0.50 × 0.75 × 0.25 u)  centre y = 1.125
-            MakeBlock("Torso", bodyGO.transform,
-                new Vector3(0f, 1.125f, 0f), new Vector3(0.50f, 0.75f, 0.25f), shirtColor);
+            if (hasSkin)
+                MakeSkinBox("Torso", bodyGO.transform,
+                    new Vector3(0f, 1.125f, 0f), new Vector3(0.50f, 0.75f, 0.25f),
+                    SkinUV(20,20,8,12), SkinUV(32,20,8,12),
+                    SkinUV(28,20,4,12), SkinUV(16,20,4,12),
+                    SkinUV(20,16,8, 4), SkinUV(28,16,8, 4));
+            else
+                MakeBlock("Torso", bodyGO.transform,
+                    new Vector3(0f, 1.125f, 0f), new Vector3(0.50f, 0.75f, 0.25f), shirtColor);
 
             // Bras gauche — pivot à l'épaule, bras pend vers -Y local
             var armLGO = new GameObject("ArmLPivot");
             armLGO.transform.SetParent(bodyGO.transform, false);
             armLGO.transform.localPosition = new Vector3(-0.375f, 1.5f, 0f);
             _armLPivot = armLGO.transform;
-            MakeBlock("ArmL", armLGO.transform,
-                new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), shirtColor);
+            if (hasSkin)
+                // Ancien format 64×32 : pas de région bras gauche — miroir du bras droit
+                // uvL/uvR inversés vs ArmR + mirrorU=true pour rendu symétrique correct
+                MakeSkinBox("ArmL", armLGO.transform,
+                    new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f),
+                    SkinUV(44,20,4,12), SkinUV(52,20,4,12),
+                    SkinUV(40,20,4,12), SkinUV(48,20,4,12),
+                    SkinUV(44,16,4, 4), SkinUV(48,16,4, 4), true);
+            else
+                MakeBlock("ArmL", armLGO.transform,
+                    new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), shirtColor);
 
             // Bras droit
             var armRGO = new GameObject("ArmRPivot");
             armRGO.transform.SetParent(bodyGO.transform, false);
             armRGO.transform.localPosition = new Vector3(0.375f, 1.5f, 0f);
             _armRPivot = armRGO.transform;
-            MakeBlock("ArmR", armRGO.transform,
-                new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), shirtColor);
+            if (hasSkin)
+                MakeSkinBox("ArmR", armRGO.transform,
+                    new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f),
+                    SkinUV(44,20,4,12), SkinUV(52,20,4,12),
+                    SkinUV(48,20,4,12), SkinUV(40,20,4,12),
+                    SkinUV(44,16,4, 4), SkinUV(48,16,4, 4));
+            else
+                MakeBlock("ArmR", armRGO.transform,
+                    new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), shirtColor);
 
             // Jambe gauche — pivot à la hanche, jambe pend vers -Y local
             var legLGO = new GameObject("LegLPivot");
             legLGO.transform.SetParent(bodyGO.transform, false);
             legLGO.transform.localPosition = new Vector3(-0.125f, 0.75f, 0f);
             _legLPivot = legLGO.transform;
-            MakeBlock("LegL", legLGO.transform,
-                new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), pantsColor);
+            if (hasSkin)
+                // Ancien format 64×32 : pas de région jambe gauche — miroir de la jambe droite
+                MakeSkinBox("LegL", legLGO.transform,
+                    new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f),
+                    SkinUV( 4,20,4,12), SkinUV(12,20,4,12),
+                    SkinUV( 0,20,4,12), SkinUV( 8,20,4,12),
+                    SkinUV( 4,16,4, 4), SkinUV( 8,16,4, 4), true);
+            else
+                MakeBlock("LegL", legLGO.transform,
+                    new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), pantsColor);
 
             // Jambe droite
             var legRGO = new GameObject("LegRPivot");
             legRGO.transform.SetParent(bodyGO.transform, false);
             legRGO.transform.localPosition = new Vector3(0.125f, 0.75f, 0f);
             _legRPivot = legRGO.transform;
-            MakeBlock("LegR", legRGO.transform,
-                new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), pantsColor);
+            if (hasSkin)
+                MakeSkinBox("LegR", legRGO.transform,
+                    new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f),
+                    SkinUV( 4,20,4,12), SkinUV(12,20,4,12),
+                    SkinUV( 8,20,4,12), SkinUV( 0,20,4,12),
+                    SkinUV( 4,16,4, 4), SkinUV( 8,16,4, 4));
+            else
+                MakeBlock("LegR", legRGO.transform,
+                    new Vector3(0f, -0.375f, 0f), new Vector3(0.25f, 0.75f, 0.25f), pantsColor);
 
             // ── HeadPivot ──────────────────────────────────────────
-            // Placé à y=1.5 (cou) dans l'espace LOCAL de la racine.
-            // La racine ayant la rotation planète, (0,1.5,0) local = 1.5 u au-dessus
-            // des pieds dans la direction "haut" de la planète. ✓
-            // Le pitch de la caméra est appliqué en localRotation (X seulement).
             var headGO = new GameObject("HeadPivot");
             headGO.transform.SetParent(_remoteCapsule.transform, false);
             headGO.transform.localPosition = new Vector3(0f, 1.5f, 0f);
             headGO.transform.localRotation = Quaternion.identity;
             _headPivot = headGO.transform;
 
-            // Cube tête (0.50 × 0.50 × 0.50 u), centre à y=0.25 au-dessus du pivot
-            MakeBlock("Head", headGO.transform,
-                new Vector3(0f, 0.25f, 0f), new Vector3(0.50f, 0.50f, 0.50f), skinColor);
-
-            // Yeux : deux petits cubes noirs sur la face avant (+Z local de HeadPivot)
-            MakeBlock("EyeL", headGO.transform,
-                new Vector3(-0.10f, 0.30f, 0.251f), new Vector3(0.10f, 0.08f, 0.01f), eyeColor);
-            MakeBlock("EyeR", headGO.transform,
-                new Vector3( 0.10f, 0.30f, 0.251f), new Vector3(0.10f, 0.08f, 0.01f), eyeColor);
+            if (hasSkin)
+            {
+                // La texture skin contient les yeux — pas de cubes séparés
+                MakeSkinBox("Head", headGO.transform,
+                    new Vector3(0f, 0.25f, 0f), new Vector3(0.50f, 0.50f, 0.50f),
+                    SkinUV( 8, 8,8,8), SkinUV(24, 8,8,8),
+                    SkinUV(16, 8,8,8), SkinUV( 0, 8,8,8),
+                    SkinUV( 8, 0,8,8), SkinUV(16, 0,8,8));
+            }
+            else
+            {
+                MakeBlock("Head", headGO.transform,
+                    new Vector3(0f, 0.25f, 0f), new Vector3(0.50f, 0.50f, 0.50f), skinColor);
+                MakeBlock("EyeL", headGO.transform,
+                    new Vector3(-0.10f, 0.30f, 0.251f), new Vector3(0.10f, 0.08f, 0.01f), eyeColor);
+                MakeBlock("EyeR", headGO.transform,
+                    new Vector3( 0.10f, 0.30f, 0.251f), new Vector3(0.10f, 0.08f, 0.01f), eyeColor);
+            }
 
             // ── Nametag world-space ────────────────────────────────
             BuildNameTag();
@@ -497,15 +543,150 @@ namespace AstroVoxel.Network
         {
             var rend = go.GetComponent<Renderer>();
             if (rend == null) return;
-            var shader = Shader.Find("Universal Render Pipeline/Lit")
+            // Priorité au shader du projet (garanti présent + compilé en URP)
+            var shader = Shader.Find("AstroVoxel/BlockUnlit")
                       ?? Shader.Find("Universal Render Pipeline/Unlit")
                       ?? Shader.Find("Standard");
             if (shader == null) return;
             var mat = new Material(shader);
-            // Compatibilité URP (_BaseColor) et Standard (_Color)
             if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", color);
             if (mat.HasProperty("_Color"))     mat.SetColor("_Color",     color);
-            rend.material = mat; // material d'instance (pas partagé)
+            rend.material = mat;
+        }
+
+        // Réinitialise les statics au démarrage du mode Play (évite l'état périmé
+        // quand Domain Reload est désactivé dans les Project Settings).
+        [UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetSkinStatics()
+        {
+            _skinTexture = null;
+            _skinMaterial = null;
+            _skinLoaded   = false;
+        }
+
+        // ── Skin Minecraft (Assets/textures/skin.png) ─────────────
+
+        private static Texture2D _skinTexture;
+        private static Material  _skinMaterial;
+        private static bool      _skinLoaded;
+
+        private static void EnsureSkinLoaded()
+        {
+            if (_skinLoaded) return;
+            _skinLoaded = true;
+
+            // En build : le fichier doit être dans Assets/Resources/skin.png
+            _skinTexture = Resources.Load<Texture2D>("skin");
+
+#if UNITY_EDITOR
+            // En éditeur, fallback sur Assets/textures/skin.png
+            if (_skinTexture == null)
+                _skinTexture = UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/textures/skin.png");
+#endif
+            if (_skinTexture == null) return;
+
+            _skinTexture.filterMode = FilterMode.Point; // pixel-perfect, sans lissage
+
+            // Même shader que les blocs voxel du projet (garanti présent + compilé)
+            var shader = Shader.Find("AstroVoxel/BlockUnlit")
+                      ?? Shader.Find("Universal Render Pipeline/Unlit")
+                      ?? Shader.Find("Standard");
+            if (shader == null) return;
+
+            _skinMaterial = new Material(shader);
+            _skinMaterial.SetTexture("_BaseMap", _skinTexture);
+            if (_skinMaterial.HasProperty("_MainTex")) _skinMaterial.SetTexture("_MainTex", _skinTexture);
+        }
+
+        /// <summary>
+        /// Convertit un rectangle en pixels (origine haut-gauche, système Minecraft)
+        /// en Rect UV Unity (origine bas-gauche, Y inversé).
+        /// Prend en compte les dimensions réelles de la texture (64×32 ancien format,
+        /// 64×64 nouveau format).
+        /// </summary>
+        private static Rect SkinUV(float px, float py, float pw, float ph)
+        {
+            float sw = _skinTexture != null ? _skinTexture.width  : 64f;
+            float sh = _skinTexture != null ? _skinTexture.height : 32f;
+            return new Rect(px / sw, 1f - (py + ph) / sh, pw / sw, ph / sh);
+        }
+
+        /// <summary>
+        /// Crée un mesh de boîte avec UV Minecraft par face.
+        /// Ordre des faces : Front(+Z), Back(-Z), Left(-X), Right(+X), Top(+Y), Bottom(-Y).
+        /// mirrorU=true : inverse U sur toutes les faces (utilisé pour les membres gauches
+        /// dans les skins ancien format 64×32 qui n’ont pas de région gauche propre).
+        /// </summary>
+        private static Mesh MakeSkinBoxMesh(Vector3 size,
+            Rect uvF, Rect uvBk, Rect uvL, Rect uvR, Rect uvT, Rect uvBot,
+            bool mirrorU = false)
+        {
+            float hx = size.x * 0.5f, hy = size.y * 0.5f, hz = size.z * 0.5f;
+
+            var verts = new Vector3[24];
+            // Front (+Z)
+            verts[0]  = new(-hx,-hy, hz); verts[1]  = new( hx,-hy, hz);
+            verts[2]  = new( hx, hy, hz); verts[3]  = new(-hx, hy, hz);
+            // Back (-Z)
+            verts[4]  = new( hx,-hy,-hz); verts[5]  = new(-hx,-hy,-hz);
+            verts[6]  = new(-hx, hy,-hz); verts[7]  = new( hx, hy,-hz);
+            // Left (-X)
+            verts[8]  = new(-hx,-hy,-hz); verts[9]  = new(-hx,-hy, hz);
+            verts[10] = new(-hx, hy, hz); verts[11] = new(-hx, hy,-hz);
+            // Right (+X)
+            verts[12] = new( hx,-hy, hz); verts[13] = new( hx,-hy,-hz);
+            verts[14] = new( hx, hy,-hz); verts[15] = new( hx, hy, hz);
+            // Top (+Y)
+            verts[16] = new(-hx, hy, hz); verts[17] = new( hx, hy, hz);
+            verts[18] = new( hx, hy,-hz); verts[19] = new(-hx, hy,-hz);
+            // Bottom (-Y)
+            verts[20] = new(-hx,-hy,-hz); verts[21] = new( hx,-hy,-hz);
+            verts[22] = new( hx,-hy, hz); verts[23] = new(-hx,-hy, hz);
+
+            Rect[] rects = { uvF, uvBk, uvL, uvR, uvT, uvBot };
+            var uvs = new Vector2[24];
+            for (int f = 0; f < 6; f++)
+            {
+                Rect rc = rects[f]; int b = f * 4;
+                // mirrorU inverse le sens U pour créer le miroir horizontal
+                float uA = mirrorU ? rc.xMax : rc.xMin;
+                float uB = mirrorU ? rc.xMin : rc.xMax;
+                uvs[b]   = new(uA, rc.yMin);
+                uvs[b+1] = new(uB, rc.yMin);
+                uvs[b+2] = new(uB, rc.yMax);
+                uvs[b+3] = new(uA, rc.yMax);
+            }
+
+            var tris = new int[36];
+            for (int f = 0; f < 6; f++)
+            {
+                int b = f * 4, i = f * 6;
+                tris[i]   = b;   tris[i+1] = b+2; tris[i+2] = b+1;
+                tris[i+3] = b;   tris[i+4] = b+3; tris[i+5] = b+2;
+            }
+
+            var mesh = new Mesh { name = "SkinBox" };
+            mesh.vertices  = verts;
+            mesh.uv        = uvs;
+            mesh.triangles = tris;
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static GameObject MakeSkinBox(string name, Transform parent,
+            Vector3 localPos, Vector3 size,
+            Rect uvF, Rect uvBk, Rect uvL, Rect uvR, Rect uvT, Rect uvBot,
+            bool mirrorU = false)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            var mf = go.AddComponent<MeshFilter>();
+            var mr = go.AddComponent<MeshRenderer>();
+            mf.mesh     = MakeSkinBoxMesh(size, uvF, uvBk, uvL, uvR, uvT, uvBot, mirrorU);
+            mr.material = _skinMaterial;
+            return go;
         }
     }
 }

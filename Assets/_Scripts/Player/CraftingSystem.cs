@@ -178,6 +178,18 @@ namespace AstroVoxel.Player
                     [ItemType.Stick]       = 2,
                 },
                 requiresTable: true),
+
+            // 3 Blackstone + 2 Sticks → 1 Propulseur (établi requis)
+            // Blackstone = BlockType.Blackstone = 67, mappé en ItemType via son ID
+            new CraftingRecipe(
+                "Propulseur",
+                ItemType.Propulseur, 1,
+                new Dictionary<ItemType, int>
+                {
+                    [(ItemType)(int)AstroVoxel.VoxelEngine.BlockType.Blackstone] = 3,
+                    [ItemType.Stick] = 2,
+                },
+                requiresTable: true),
         };
 
         // ── API publique ──────────────────────────────────────

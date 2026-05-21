@@ -350,6 +350,10 @@ namespace AstroVoxel.Player
             foreach (var blockId in BlockFaceData.AllBlockIds)
                 BuildSlot(contentGO.transform, blockId);
 
+            // Slot item non-bloc : Propulseur
+            BuildItemSlot(contentGO.transform, ItemType.Propulseur, "Propulseur",
+                new Color(1f, 0.50f, 0.05f));
+
             // Scrollbar verticale fine
             var sbGO = new GameObject("Scrollbar_V");
             sbGO.transform.SetParent(scrollGO.transform, false);
@@ -475,6 +479,86 @@ namespace AstroVoxel.Player
             });
 
             _allSlots.Add((slotGO, blockId, dName));
+        }
+
+        // ── Slot item non-bloc (générique) ────────────────────
+        // Même comportement que BuildSlot : remplace le contenu du slot hotbar actif.
+
+        private void BuildItemSlot(Transform parent, ItemType itemType, string displayName, Color iconColor)
+        {
+            var slotGO = new GameObject($"Slot_Item_{itemType}");
+            slotGO.transform.SetParent(parent, false);
+            slotGO.AddComponent<RectTransform>();
+
+            var slotImg           = slotGO.AddComponent<Image>();
+            slotImg.color         = _slotBg;
+            slotImg.raycastTarget = true;
+
+            // Icône couleur unie représentant l'item
+            var iconGO       = new GameObject("Icon");
+            iconGO.transform.SetParent(slotGO.transform, false);
+            var iconRT       = iconGO.AddComponent<RectTransform>();
+            iconRT.anchorMin = new Vector2(0.1f, 0.1f);
+            iconRT.anchorMax = new Vector2(0.9f, 0.9f);
+            iconRT.offsetMin = Vector2.zero;
+            iconRT.offsetMax = Vector2.zero;
+            var rawImg       = iconGO.AddComponent<RawImage>();
+            rawImg.raycastTarget = false;
+            var iconTex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            iconTex.SetPixel(0, 0, iconColor);
+            iconTex.Apply();
+            rawImg.texture = iconTex;
+            rawImg.color   = Color.white;
+
+            var trigger      = slotGO.AddComponent<EventTrigger>();
+            var capturedImg  = slotImg;
+            var capturedItem = itemType;
+
+            AddTrigger(trigger, EventTriggerType.PointerEnter, _ =>
+            {
+                capturedImg.color = _slotHover;
+                if (_tooltip != null) _tooltip.text = displayName;
+            });
+            AddTrigger(trigger, EventTriggerType.PointerExit, _ =>
+            {
+                capturedImg.color = _slotBg;
+                if (_tooltip != null) _tooltip.text = "";
+            });
+            // Clic : place l'item dans le slot hotbar actif (identique aux blocs)
+            AddTrigger(trigger, EventTriggerType.PointerClick, _ =>
+            {
+                if (_blockInteract != null)
+                    _blockInteract.SetCreativeHotbarItemSlot(_blockInteract.HotbarIndex, capturedItem);
+                Close();
+            });
+            // Drag & drop vers la hotbar
+            AddTrigger(trigger, EventTriggerType.BeginDrag, data =>
+            {
+                var ped = (PointerEventData)data;
+                if (_dragGhost == null) return;
+                _dragGhost.gameObject.SetActive(true);
+                _dragGhost.texture = iconTex;
+                _dragGhost.color   = new Color(iconColor.r, iconColor.g, iconColor.b, 0.85f);
+                MoveGhost(ped.position);
+            });
+            AddTrigger(trigger, EventTriggerType.Drag, data =>
+            {
+                if (_dragGhost != null && _dragGhost.gameObject.activeSelf)
+                    MoveGhost(((PointerEventData)data).position);
+            });
+            AddTrigger(trigger, EventTriggerType.EndDrag, data =>
+            {
+                if (_dragGhost != null) _dragGhost.gameObject.SetActive(false);
+                if (_blockInteract == null) return;
+                var ped  = (PointerEventData)data;
+                int slot = HotbarSlotAtScreen(ped.position);
+                _blockInteract.SetCreativeHotbarItemSlot(
+                    slot >= 0 ? slot : _blockInteract.HotbarIndex,
+                    capturedItem);
+            });
+
+            // Ajout à la liste de slots pour la recherche
+            _allSlots.Add((slotGO, 0, displayName));
         }
 
         // ── Search filter ─────────────────────────────────────

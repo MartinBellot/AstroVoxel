@@ -206,21 +206,29 @@ namespace AstroVoxel.Player
             }
             else
             {
-                // Créatif : utilise BlockType[] directement
+                // Créatif : blocs ET items non-blocs (Propulseur…)
                 var hotbar = _blockInteract.Hotbar;
                 for (int i = 0; i < hotbar.Length && i < _slotIcon.Length; i++)
                 {
-                    if (hotbar[i] != _hotbarCache[i])
-                    {
-                        _hotbarCache[i] = hotbar[i];
+                    ItemType creativeItem = _blockInteract.GetCreativeHotbarItem(i);
+                    bool changed = hotbar[i] != _hotbarCache[i]
+                                || creativeItem != _hotbarItemTypeCache[i];
+                    if (!changed) continue;
+
+                    _hotbarCache[i]         = hotbar[i];
+                    _hotbarItemTypeCache[i] = creativeItem;
+
+                    if (creativeItem != ItemType.None)
+                        ApplyItemIcon(_slotIcon[i], creativeItem);
+                    else
                         ApplyBlockColor(_slotIcon[i], hotbar[i], _materials);
-                        if (_slotIconTint != null && i < _slotIconTint.Length)
-                            _slotIconTint[i] = _slotIcon[i].color;
-                        bool selected = (i == _visibleIndex);
-                        var t = _slotIconTint != null && i < _slotIconTint.Length
-                            ? _slotIconTint[i] : Color.white;
-                        _slotIcon[i].color = new Color(t.r, t.g, t.b, selected ? 1f : 0.55f);
-                    }
+
+                    if (_slotIconTint != null && i < _slotIconTint.Length)
+                        _slotIconTint[i] = _slotIcon[i].color;
+                    bool selected = (i == _visibleIndex);
+                    var t = _slotIconTint != null && i < _slotIconTint.Length
+                        ? _slotIconTint[i] : Color.white;
+                    _slotIcon[i].color = new Color(t.r, t.g, t.b, selected ? 1f : 0.55f);
                 }
             }
 
@@ -264,7 +272,11 @@ namespace AstroVoxel.Player
             }
             else
             {
-                ShowBlockLabel(BlockFaceData.GetDisplayName((byte)_blockInteract.ActiveBlock));
+                ItemType creativeItem = _blockInteract.GetCreativeHotbarItem(idx);
+                if (creativeItem != ItemType.None)
+                    ShowBlockLabel(ItemTypeHelper.GetDisplayName(creativeItem));
+                else
+                    ShowBlockLabel(BlockFaceData.GetDisplayName((byte)_blockInteract.ActiveBlock));
             }
         }
 
@@ -843,6 +855,7 @@ namespace AstroVoxel.Player
                 case ItemType.StoneAxe:      return new Color(0.60f, 0.60f, 0.60f);
                 case ItemType.StoneShovel:   return new Color(0.60f, 0.60f, 0.60f);
                 case ItemType.IronPickaxe:   return new Color(0.85f, 0.85f, 0.90f);
+                case ItemType.Propulseur:    return new Color(1.00f, 0.50f, 0.05f);   // orange thruster
                 default:                     return Color.gray;
             }
         }
