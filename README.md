@@ -672,22 +672,3 @@ Assets/
 ├── Settings/               # URP Renderer, Volume Profile
 └── textures/               # Atlas de textures blocs
 ```
-
----
-
-## Assets utilisés
-
-| Asset | Source Unity Asset Store |
-|---|---|
-| Personnage joueur | [Free Sci-Fi Trooper Man v3](https://assetstore.unity.com/packages/3d/characters/humanoids/sci-fi/free-sci-fi-trooper-man-v3-279548) |
-| Vaisseau spatial | [Space Shuttle of the Future](https://assetstore.unity.com/packages/3d/vehicles/space/space-shuttle-of-the-future-111392) |
-| UFO ennemi + armement | [UFO Battleship](https://assetstore.unity.com/packages/3d/vehicles/space/ufo-battleship-289193) |
-| Station spatiale | [Space Station Free 3D (HDRP/URP)](https://assetstore.unity.com/packages/3d/vehicles/space/space-station-free-3d-asset-hdrp-urp-built-in-188734) |
-| Astéroïdes (pack 1) | [Asteroids Low Poly Pack](https://assetstore.unity.com/packages/3d/environments/sci-fi/asteroids-low-poly-pack-142164) |
-| Astéroïdes (pack 2) | [3D Asteroid Pack](https://assetstore.unity.com/packages/3d/environments/sci-fi/3d-asteroid-pack-263841) |
-| Aliens / Ennemis | [Horror Plush Toys Spooky Alien Mascots](https://assetstore.unity.com/packages/3d/characters/humanoids/horror-plush-toys-spooky-alien-mascots-255252) |
-| Musiques | [16-Bit Space Adventure Music Pack](https://assetstore.unity.com/packages/audio/music/electronic/16-bit-space-adventure-music-pack-179084) |
-
----
-
-*README généré le 21 mai 2026 — AstroVoxel*
