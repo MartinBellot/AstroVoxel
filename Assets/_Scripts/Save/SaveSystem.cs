@@ -603,5 +603,67 @@ namespace AstroVoxel.Save
 
         private static string GetSavePath(string name)
             => Path.Combine(GetSaveDirectory(), name + ".json");
+
+        // ── API statique (utilisable avant la création de l'instance) ──
+        // Appelée par MainMenu avant que GameBootstrap ait construit le monde.
+
+        /// <summary>Liste tous les noms de saves sans instance.</summary>
+        public static string[] GetAllSaveNames()
+        {
+            string dir = GetSaveDirectory();
+            if (!Directory.Exists(dir)) return Array.Empty<string>();
+            string[] files = Directory.GetFiles(dir, "*.json");
+            string[] names = new string[files.Length];
+            for (int i = 0; i < files.Length; i++)
+                names[i] = Path.GetFileNameWithoutExtension(files[i]);
+            return names;
+        }
+
+        /// <summary>
+        /// Lit les métadonnées d'une save pour affichage dans le menu (seed, date, gameMode).
+        /// Retourne null si le fichier est absent ou corrompu.
+        /// </summary>
+        public static WorldSaveData ReadSaveMetadata(string saveName)
+        {
+            string path = GetSavePath(saveName);
+            if (!File.Exists(path)) return null;
+            try
+            {
+                string json = File.ReadAllText(path);
+                return JsonUtility.FromJson<WorldSaveData>(json);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Charge une save sans instance : fixe la seed, stocke PendingLoad
+        /// et recharge la scène. Appelé par MainMenu.
+        /// </summary>
+        public static void LoadWorldStatic(string saveName)
+        {
+            string path = GetSavePath(saveName);
+            if (!File.Exists(path))
+                throw new FileNotFoundException($"Sauvegarde introuvable : {saveName}", path);
+
+            string        json = File.ReadAllText(path);
+            WorldSaveData data = JsonUtility.FromJson<WorldSaveData>(json);
+            if (data == null)
+                throw new InvalidDataException($"Fichier de sauvegarde corrompu : {saveName}");
+
+            _pendingLoadName = saveName;
+            PendingLoad      = data;
+            WorldSeedManager.ForceInitialize(data.seed);
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+        }
+
+        /// <summary>Supprime une save sans instance.</summary>
+        public static void DeleteSaveFile(string saveName)
+        {
+            string path = GetSavePath(saveName);
+            if (File.Exists(path)) File.Delete(path);
+        }
     }
 }

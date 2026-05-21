@@ -25,6 +25,19 @@ namespace AstroVoxel.Network
         public static PlayerNetworkSync GetById(ulong clientId) =>
             _registry.TryGetValue(clientId, out var s) ? s : null;
 
+        /// <summary>ClientId du joueur associé à ce sync.</summary>
+        public ulong ClientId => _clientId;
+
+        /// <summary>Transform du mannequin distant (null si local ou mannequin non créé).</summary>
+        public Transform RemoteTransform => _remoteCapsule != null ? _remoteCapsule.transform : null;
+
+        /// <summary>Itère sur tous les syncs distants (joueurs clients).</summary>
+        public static void ForEachRemote(System.Action<PlayerNetworkSync> action)
+        {
+            foreach (var s in _registry.Values)
+                if (s != null && !s._isLocal) action(s);
+        }
+
         // ── Identité ──────────────────────────────────────────
         private ulong _clientId;
         private bool  _isLocal;

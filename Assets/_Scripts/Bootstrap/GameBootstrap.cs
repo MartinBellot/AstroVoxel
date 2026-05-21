@@ -37,18 +37,85 @@ namespace AstroVoxel.Bootstrap
         [SerializeField] private float playerRadius  = 0.4f;
         [SerializeField] private float spawnAltitude = 10f;   // blocs au-dessus de la surface
 
+        [Header("Menu")]
+        [Tooltip("Si coché, bypasse le menu principal et lance directement le monde (utile en développement).")]
+        [SerializeField] private bool _skipMenu = false;
+
+        // ── État en attente (static → survit au rechargement de scène) ──
+        /// <summary>true = héberger un serveur dès que le monde est prêt.</summary>
+        internal static bool _pendingHost          = false;
+        /// <summary>Mode de jeu pour un nouveau monde (-1 = non défini → Créatif par défaut).</summary>
+        internal static int  _pendingGameModeValue = -1;
+
         // ── Cycle de vie ──────────────────────────────────────
 
         private void Awake()
         {
-            // ── Réseau (avant tout le reste) ─────────────────────────
+            // Le réseau doit être initialisé en premier dans tous les cas.
             BuildNetworkManager();
 
-            // Remet le jeu en mode Créatif à chaque rechargement de scène
+            // Décider si le menu doit s'afficher :
+            //  • développeur a coché _skipMenu
+            //  • une save est déjà en attente (vient de /load ou du menu lui-même)
+            //  • une reconnexion réseau est en cours (join code présent)
+            bool skipMenu = _skipMenu
+                || AstroVoxel.Save.SaveSystem.PendingLoad != null
+                || ServerManager.PendingJoinCode          != null;
+
+            if (skipMenu)
+            {
+                StartWorld();
+            }
+            else
+            {
+                MainMenu.Show(this, OnMenuResult);
+            }
+        }
+
+        // ── Callback du menu ──────────────────────────────────
+
+        private void OnMenuResult(MainMenu.MenuResult result)
+        {
+            if (result.IsLoad)
+            {
+                // Charger une save existante : fixe la seed dans les statics
+                // et recharge la scène. Awake() tournera à nouveau avec PendingLoad≠null.
+                _pendingHost = result.IsHost;
+                AstroVoxel.Save.SaveSystem.LoadWorldStatic(result.SaveName);
+                // ⚠ La scène se recharge ici — le code suivant n'est jamais atteint.
+            }
+            else
+            {
+                // Nouveau monde ou rejoindre
+                if (result.CustomSeed.HasValue)
+                    WorldSeedManager.ForceInitialize(result.CustomSeed.Value);
+                else
+                    WorldSeedManager.GenerateNewSeed();
+
+                _pendingGameModeValue = result.GameMode == AstroVoxel.Player.GameMode.Survival ? 1 : 0;
+                _pendingHost          = result.IsHost;
+
+                if (result.JoinCode != null)
+                    ServerManager.PendingJoinCode = result.JoinCode;
+
+                StartWorld();
+            }
+        }
+
+        // ── Construction du monde ────────────────────────────
+
+        private void StartWorld()
+        {
+            // Remet le jeu en mode Créatif (base), puis applique le mode en attente si défini.
             GameModeManager.ResetToCreative();
+            if (_pendingGameModeValue >= 0)
+            {
+                GameModeManager.SetMode((AstroVoxel.Player.GameMode)_pendingGameModeValue);
+                _pendingGameModeValue = -1;
+            }
 
             // ── Seed globale du monde ─────────────────────────
-            // Si une sauvegarde est en attente, la seed a déjà été forcée par SaveSystem.LoadWorld().
+            // Si une sauvegarde est en attente, la seed a déjà été forcée par LoadWorldStatic().
             // Initialize() est idempotent : elle ne fait rien si IsInitialized=true.
             if (AstroVoxel.Save.SaveSystem.PendingLoad == null)
                 WorldSeedManager.Initialize();  // aléatoire au premier lancement, conservée après /restart
@@ -95,6 +162,16 @@ namespace AstroVoxel.Bootstrap
             // ── Câblage réseau (world + ship disponibles ici) ─────────
             BuildNetworkComponents(world);
 
+            // ── Vaisseaux ennemis ──────────────────────────────────────
+            BuildEnemyShips(playerBody);
+
+            // ── Auto-host (demandé depuis le menu) ────────────────────
+            if (_pendingHost)
+            {
+                _pendingHost = false;
+                StartCoroutine(CoAutoHost());
+            }
+
             // ── Auto-reconnect après reload de seed ───────────────────
             if (ServerManager.PendingJoinCode != null)
             {
@@ -102,6 +179,19 @@ namespace AstroVoxel.Bootstrap
                 ServerManager.PendingJoinCode = null; // évite les boucles infinies
                 StartCoroutine(CoAutoJoin(code));
             }
+        }
+
+        private IEnumerator CoAutoHost()
+        {
+            yield return null; // laisse un frame pour finir l'initialisation
+            var sm = ServerManager.Instance;
+            if (sm == null) yield break;
+            sm.OnHostReady += code =>
+            {
+                GUIUtility.systemCopyBuffer = code;
+                Debug.Log($"[AstroVoxel] Serveur actif ! Code : {code}  (copié dans le presse-papier — ouvrez la console avec T pour le voir)");
+            };
+            sm.HostServer();
         }
 
         private IEnumerator CoAutoJoin(string code)
@@ -365,6 +455,11 @@ namespace AstroVoxel.Bootstrap
             var console = consoleGO.AddComponent<GameConsole>();
             console.Init(canvas, blockInteract);
 
+            // Menu pause (ÉCHAP)
+            var pauseGO = new GameObject("PauseMenu");
+            pauseGO.transform.SetParent(canvasGO.transform, false);
+            pauseGO.AddComponent<PauseMenu>().Init(canvas);
+
             // Scoreboard multijoueur (TAB — visible uniquement si réseau actif)
             Scoreboard.Create(canvas);
         }
@@ -614,6 +709,21 @@ namespace AstroVoxel.Bootstrap
             var ship = FindAnyObjectByType<SpaceShipController>();
             if (ship != null)
                 ServerManager.Instance?.SetShip(ship);
+        }
+
+        private static void BuildEnemyShips(Transform player)
+        {
+            // EnemySyncManager — gère les messages réseau ennemis
+            if (AstroVoxel.Network.EnemySyncManager.Instance == null)
+            {
+                var syncGO = new GameObject("EnemySyncManager");
+                syncGO.AddComponent<AstroVoxel.Network.EnemySyncManager>();
+            }
+
+            // EnemySpaceShipSpawner — spawn initial + respawn
+            var spawnerGO = new GameObject("EnemySpaceShipSpawner");
+            var spawner   = spawnerGO.AddComponent<AstroVoxel.Space.EnemySpaceShipSpawner>();
+            spawner.Init(player);
         }
 
         // ── Système de sauvegarde ───────────────────────

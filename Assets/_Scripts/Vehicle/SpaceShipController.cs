@@ -100,6 +100,12 @@ namespace AstroVoxel.Vehicle
         [Tooltip("Rayon maximum pour embarquer (unités).")]
         [SerializeField] private float boardingRadius = 8f;
 
+        [Header("Armement")]
+        [Tooltip("Dégâts infligés par tir laser sur un vaisseau ennemi.")]
+        [SerializeField] private int   weaponDamage   = 15;
+        [Tooltip("Délai minimum entre deux tirs (secondes).")]
+        [SerializeField] private float weaponCooldown = 0.5f;
+
         [Header("Références")]
         [Tooltip("Caméra 3e personne du vaisseau (inactive par défaut).")]
         [SerializeField] public Camera shipCamera;
@@ -162,6 +168,7 @@ namespace AstroVoxel.Vehicle
 
         private bool      _piloting;
         private bool      _exploded;
+        private float     _weaponCooldownTimer;
         private Transform _player;
         private Camera    _playerCamera;
 
@@ -173,6 +180,10 @@ namespace AstroVoxel.Vehicle
         private bool  _remoteVertical;
         private bool  _remoteWingTrail;
         private bool  _hasRemoteParticleState;
+
+        // ── Vitesse visuelle (fallback pour ships distants sans état réseau) ──
+        private Vector3 _prevParticlePos;
+        private float   _visualParticleSpeed;
 
         // ── Propriétés publiques ──────────────────────────────
 
@@ -375,6 +386,15 @@ namespace AstroVoxel.Vehicle
                 -roll                 * rollSpeed
             ) * Mathf.Deg2Rad;
 
+            // Tir laser (clic gauche, curseur verrouillé)
+            if (_weaponCooldownTimer > 0f)
+                _weaponCooldownTimer -= Time.deltaTime;
+            if (cursorLocked && GetFireWeapon() && _weaponCooldownTimer <= 0f)
+            {
+                FireShipCannon();
+                _weaponCooldownTimer = weaponCooldown;
+            }
+
             // Débarquer
             if (GetKeyDown_Board())
                 Disembark();
@@ -395,6 +415,12 @@ namespace AstroVoxel.Vehicle
 
         private void LateUpdate()
         {
+            // Vitesse visuelle = déplacement réel entre deux frames (fonctionne même
+            // si le Rigidbody est kinematic, comme pour les vaisseaux distants).
+            _visualParticleSpeed = (transform.position - _prevParticlePos).magnitude
+                                   / Mathf.Max(Time.deltaTime, 0.001f);
+            _prevParticlePos = transform.position;
+
             UpdateThrusterTrail();
             UpdateVerticalThrusterTrail();
             UpdateWingTrails();
@@ -903,7 +929,10 @@ namespace AstroVoxel.Vehicle
             if (thrusterParticles == null) return;
 
             // Utilise la vitesse réseau quand piloté à distance, sinon la vitesse physique locale
-            float speed = (_hasRemoteParticleState && !_piloting) ? _remoteSpeed : Speed;
+            // Priorité : état réseau explicite > pilotage local > vitesse visuelle (vaisseau distant)
+            float speed = (_hasRemoteParticleState && !_piloting)
+                ? _remoteSpeed
+                : (_piloting ? Speed : _visualParticleSpeed);
             float t    = Mathf.Clamp01(speed / trailMaxSpeed);
             float rate = t * t * 260f;
 
@@ -1299,6 +1328,150 @@ namespace AstroVoxel.Vehicle
 #else
             return Input.GetAxisRaw("Mouse Y");
 #endif
+        }
+
+        private static bool GetFireWeapon()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+            var m  = Mouse.current;
+            return (m  != null && m.leftButton.wasPressedThisFrame)
+                || (kb != null && kb.pKey.wasPressedThisFrame);
+#else
+            return Input.GetMouseButtonDown(0) || Input.GetKeyDown(KeyCode.P);
+#endif
+        }
+
+        // ── Armement ──────────────────────────────────────────
+
+        private void FireShipCannon()
+        {
+            // Cherche l'ennemi le plus proche dans la portée de guidage
+            const float homingRange = 800f;
+            EnemySpaceShipController bestEnemy = null;
+            float bestDist = homingRange;
+
+            foreach (var enemy in EnemySpaceShipController.AllEnemies)
+            {
+                if (enemy == null || enemy.IsDead) continue;
+                float d = Vector3.Distance(transform.position, enemy.transform.position);
+                if (d < bestDist) { bestDist = d; bestEnemy = enemy; }
+            }
+
+            // Spawn du missile joueur
+            var go = new GameObject("PlayerMissile");
+            go.transform.position = transform.position + transform.forward * 3f;
+            go.transform.rotation = transform.rotation;
+
+            var missile = go.AddComponent<PlayerMissile>();
+            missile.Initialize(
+                _rb.linearVelocity + transform.forward * 160f,
+                bestEnemy != null ? bestEnemy.transform : null,
+                GetComponent<Collider>()
+            );
+        }
+
+        /// <summary>
+        /// Lance 4 bolts laser fragmentés style Star Wars le long du rayon from→to.
+        /// </summary>
+        private static void SpawnLaserEffect(Vector3 from, Vector3 to)
+        {
+            const int   numBolts  = 4;
+            const float boltLen   = 9f;
+            const float boltSpeed = 600f;
+            const float gap       = 42f;  // unités d'écart entre chaque bolt
+
+            Vector3 dir  = (to - from).normalized;
+            float   dist = Vector3.Distance(from, to);
+            if (dist < 0.5f) return;
+
+            for (int i = 0; i < numBolts; i++)
+            {
+                // elapsed négatif = délai : bolt i apparaît (i×gap/speed) secondes plus tard
+                LaserBoltFx.Spawn(from, dir, dist, boltLen, -(i * gap / boltSpeed));
+            }
+        }
+
+        // ─────────────────────────────────────────────────────
+        // Bolt laser animé (Star Wars style)
+        // ─────────────────────────────────────────────────────
+
+        private sealed class LaserBoltFx : MonoBehaviour
+        {
+            private const float BoltSpeed = 600f;
+
+            // Tête : jaune vif ; queue : orange-jaune semi-transparent
+            private static readonly Color HeadColor = new Color(1.00f, 0.95f, 0.25f, 1.0f);
+            private static readonly Color TailColor = new Color(1.00f, 0.70f, 0.00f, 0.4f);
+
+            private LineRenderer _lr;
+            private Vector3      _origin;
+            private Vector3      _dir;
+            private float        _totalDist;
+            private float        _boltLen;
+            private float        _elapsed;
+
+            /// <param name="startElapsed">Négatif = délai avant apparition (s).</param>
+            public static void Spawn(Vector3 origin, Vector3 dir, float totalDist,
+                                     float boltLen, float startElapsed)
+            {
+                var go    = new GameObject("LB");
+                var fx    = go.AddComponent<LaserBoltFx>();
+                fx._origin    = origin;
+                fx._dir       = dir;
+                fx._totalDist = totalDist;
+                fx._boltLen   = boltLen;
+                fx._elapsed   = startElapsed;
+
+                var lr = go.AddComponent<LineRenderer>();
+                lr.useWorldSpace  = true;
+                lr.positionCount  = 2;
+                lr.startWidth     = 0.32f;
+                lr.endWidth       = 0.07f;
+                lr.numCapVertices = 4;
+                lr.alignment      = LineAlignment.View;
+                lr.startColor     = HeadColor;
+                lr.endColor       = TailColor;
+                lr.enabled        = false;
+
+                var sh = Shader.Find("AstroVoxel/ThrusterParticle")
+                      ?? Shader.Find("Universal Render Pipeline/Particles/Unlit")
+                      ?? Shader.Find("Particles/Additive")
+                      ?? Shader.Find("Sprites/Default");
+                if (sh != null)
+                {
+                    var mat = new Material(sh) { name = "LaserBolt_Auto" };
+                    mat.SetColor("_TintColor", Color.white);   // teinte neutre : couleur vertex seule
+                    lr.sharedMaterial = mat;
+                }
+                fx._lr = lr;
+            }
+
+            private void Update()
+            {
+                _elapsed += Time.deltaTime;
+                float head = _elapsed * BoltSpeed;
+                float tail = Mathf.Max(0f, head - _boltLen);
+
+                // Bolt sorti du rayon : destruction
+                if (tail >= _totalDist) { Destroy(gameObject); return; }
+
+                // Bolt en délai initial : invisible
+                _lr.enabled = head > 0f;
+                if (!_lr.enabled) return;
+
+                // Positions tête / queue
+                _lr.SetPosition(0, _origin + _dir * Mathf.Min(head, _totalDist));
+                _lr.SetPosition(1, _origin + _dir * tail);
+
+                // Fade à l'impact + légère pulsation plasma
+                float fade  = 1f - Mathf.Clamp01((head - _totalDist) / (_boltLen + 2f));
+                float pulse = 1f + 0.18f * Mathf.Sin(_elapsed * 55f);
+                _lr.startWidth = 0.32f * pulse * fade;
+                _lr.endWidth   = 0.07f          * fade;
+                _lr.startColor = new Color(HeadColor.r, HeadColor.g, HeadColor.b, fade);
+                _lr.endColor   = new Color(TailColor.r, TailColor.g, TailColor.b, fade * 0.5f);
+            }
         }
 
         // ── Gizmos ────────────────────────────────────────────

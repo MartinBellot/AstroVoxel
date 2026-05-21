@@ -414,6 +414,9 @@ namespace AstroVoxel.Network
                 nm.CustomMessagingManager.SendNamedMessage(
                     MsgShipSpawn, clientId, w2, NetworkDelivery.ReliableSequenced);
             }
+
+            // 5. État des vaisseaux ennemis (IA)
+            EnemySyncManager.Instance?.SendEnemyStateToNewClient(clientId);
         }
 
         private static void SendWorldDone(ulong clientId)
@@ -487,6 +490,9 @@ namespace AstroVoxel.Network
                 cmm.RegisterNamedMessageHandler(MsgPlayerLeave, HandlePlayerLeave);
                 cmm.RegisterNamedMessageHandler(MsgShipSpawn,   HandleShipSpawn);
             }
+
+            // Ennemis IA
+            EnemySyncManager.Instance?.RegisterHandlers();
         }
 
         private void HandlePlayerList(ulong senderId, FastBufferReader reader)

@@ -34,12 +34,10 @@ namespace AstroVoxel.Player
         private void Update()
         {
             if (CreativeInventory.IsOpen || SurvivalInventory.IsOpen || GameConsole.IsOpen) return;
+            if (AstroVoxel.Bootstrap.PauseMenu.IsPaused) return;
 
             if (!IsCursorLocked() && GetAnyMouseButtonDown())
                 LockCursor(true);
-
-            if (GetKeyDown_Escape())
-                LockCursor(false);
 
             if (IsCursorLocked())
                 HandleMouseLook();
