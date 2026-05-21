@@ -1,4 +1,0 @@
-- Lister les design patterns
-
-
-
