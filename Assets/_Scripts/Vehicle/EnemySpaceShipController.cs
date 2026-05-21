@@ -762,6 +762,7 @@ namespace AstroVoxel.Vehicle
             var go = new GameObject("EnemyExplosion");
             go.transform.position = position;
             var ps = go.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
             ConfigureExplosionPS(ps);
             ps.Play();
             Destroy(go, 4f);
